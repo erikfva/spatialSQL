@@ -259,7 +259,7 @@ IF find_cnt > 0 THEN --> Si se han encontrado poligonos.
 	a := 'temp.' || tbl_name || '_ppred'; --> Nombre de la capa resultante de intersectar los poligonos de entrada con los predios.
     EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_name || '_ppred1' || ' ON COMMIT DROP AS ' || sql;
 --> Complementando información de ubicación politico-administrativo.
-    sql := 'SELECT t.*,u.nom_dep, u.nom_prov, u.nom_mun, u.cod_mun 
+    sql := 'SELECT t.*,u.nom_dep, u.nom_prov, u.nom_mun 
     	FROM
         	' || tbl_name || '_ppred1' || ' t LEFT OUTER JOIN
 			(SELECT * FROM sicob_ubication(''' || tbl_name || '_ppred1' || ''') ) u
