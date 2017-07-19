@@ -164,9 +164,9 @@ IF 'PDM' = ANY (_doanalisys) THEN
         EXECUTE '
         SELECT array_to_json(array_agg(q)) as detalle
         FROM(
-            select res_adm, to_char(fec_res, ''YYYY-MM-DD'') as fec_res, nom_pre, sum(sicob_sup) as sicob_sup_sob,
+            select id_a as sicob_id, res_adm, to_char(fec_res, ''YYYY-MM-DD'') as fec_res, nom_pre, sum(sicob_sup) as sicob_sup_sob,
             count(*) as cantidad_poligonos 
-            from ' || (_aux->>'lyr_over')::text || ' group by res_adm,res_adm, fec_res, nom_pre
+            from ' || (_aux->>'lyr_over')::text || ' group by id_a, res_adm,res_adm, fec_res, nom_pre
             order by fec_res
          )q;' INTO detalle;
          --EXECUTE format(sql,_aux->>'lyr_over',_lyr_in) INTO detalle;
