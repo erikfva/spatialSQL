@@ -231,10 +231,8 @@ END LOOP;
 
 IF find_cnt > 0 THEN --> Si se han encontrado poligonos.
 
-	--> CREANDO LA COBERTURA RESULTANTE.
-
+	--> CREANDO LA COBERTURA RESULTANTE Y AGREGANDO LOS CAMPOS DE LA CAPA DE ENTRADA.
     sql := 'SELECT  
-		CAST(row_number() OVER () AS integer) AS sicob_id,
   		r.predio,
   		r.propietario,
 		r.titulo,
@@ -256,8 +254,13 @@ IF find_cnt > 0 THEN --> Si se han encontrado poligonos.
   		 INNER JOIN ' || (_opt->>'lyr_in')::text || ' a ON (r.id_a = a.sicob_id) ' ||
 --        'WHERE r.predio IS NOT NULL ' || --> Filtrando en la capa resultado solamente los poligonos que tienen predio.
         'ORDER BY a.sicob_id';
-	a := 'temp.' || tbl_name || '_ppred'; --> Nombre de la capa resultante de intersectar los poligonos de entrada con los predios.
+	sql := '
+    	SELECT CAST(row_number() OVER () AS integer) AS sicob_id, t.* 
+        FROM 
+        (' || sql || ') t';
     EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_name || '_ppred1' || ' ON COMMIT DROP AS ' || sql;
+    
+	a := 'temp.' || tbl_name || '_ppred'; --> Nombre de la capa resultante de intersectar los poligonos de entrada con los predios.
 --> Complementando información de ubicación politico-administrativo.
     sql := 'SELECT t.*,u.nom_dep, u.nom_prov, u.nom_mun 
     	FROM
@@ -283,7 +286,7 @@ IF find_cnt > 0 THEN --> Si se han encontrado poligonos.
     IF COALESCE( (tmp->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado POP.
         sql := '
             UPDATE ' || a || ' a
-            SET resol_pop = b.res_adm, fec_resol_pop = fec_res
+            SET resol_pop = b.res_adm, fec_resol_pop = b.fec_res
             FROM ' || (tmp->>'lyr_over')::text || ' b
             WHERE
             b.id_a = a.sicob_id
@@ -313,6 +316,36 @@ IF find_cnt > 0 THEN --> Si se han encontrado poligonos.
     --AGREGANDO LA GEOINFORMACION
 	PERFORM sicob_add_geoinfo_column(a);
     PERFORM sicob_update_geoinfo_column(a);
+	--Eliminando poligonos con superfice menor a la mínima.
+    IF _min_sup > 0 THEN
+    	sql := 'DELETE FROM ' || a || 
+        ' WHERE sicob_sup < ' || _min_sup::text;
+        RAISE DEBUG 'Running %', sql;
+        EXECUTE sql;
+        GET DIAGNOSTICS _row_cnt = ROW_COUNT;
+        IF _row_cnt > 0 THEN
+        --RENUMERANDO EL INDICE sicob_id
+        	sql := '
+            	select CAST(row_number() OVER () AS integer) AS new_sicob_id, t.sicob_id
+                from (
+                	select * from ' || a || '
+                    order by sicob_id
+                ) t
+            ';
+            EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_name || '_newidx' || ' ON COMMIT DROP AS ' || sql;
+            
+        	sql := '
+            	UPDATE ' || a || ' a
+            	SET sicob_id = (
+                	SELECT new_sicob_id
+                    FROM ' || tbl_name || '_newidx
+                    WHERE sicob_id = a.sicob_id
+            	)
+            ';
+            RAISE DEBUG 'Running %', sql;
+            EXECUTE sql;
+        END IF;
+    END IF;    
 
     _out := _out::jsonb || ('{"features_inters_cnt":"' || find_cnt::text || 
     '", "features_diff_cnt":"' || (_row_cnt - find_cnt)::text || 
