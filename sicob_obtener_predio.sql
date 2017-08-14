@@ -16,16 +16,17 @@ DECLARE
  _condition text;
  a text;
  createdResult boolean := FALSE;
- lyrs_predio json[];
+ lyrs_predio json;
  lyr_predio json;
  tmp json;
- find_cnt integer;
+ inters_cnt integer; diff_cnt integer;
 BEGIN
 
 --VARIABLES DE ENTRADA:
 --	lyr_in : capa con los poligonos que deben ser ubicados en sus predios correspondientes
 --	condition (opcional):  Filtro para los datos de la capa "lyr_in". Si no se especifica, se toman todos los registros.
 --> lyr_pred : capa con predios de referencia.
+--> lyr_parc : capa con las parcelas de referencia.
 --> fldpredio : campo que contiene el nombre del predio en la capa de referencia.
 --> fldpropietario : campo que contiene el nombre del propietario en la capa de referncia. 
 --> geojson (opcional true/false): Devuelve el resultado en formato geojson. Por defecto es false.
@@ -45,62 +46,83 @@ BEGIN
 --_opt := '{"lyr_in":"coberturas.b0603206_pdm_a052016","condition":"objectid_1 = 35884"}';
 --_opt := '{"lyr_in":"coberturas.b0603206_pdm_a052016","condition":"objectid_1 = 11426"}';
 --_opt := '{"lyr_in":"coberturas.pdm","condition":"res_adm = ''RS-OLSC-PDM-129-2000''"}';
---_opt := '{"lyr_in":"uploads.f20170704gcfebdac5d7c097","lyr_pred":"uploads.f20170705ecgdbfafbc4c20f"}'::json;
+--_opt := '{"lyr_in":"uploads.f20170704gcfebdac5d7c097","lyr_parc":"uploads.f20170705ecgdbfafbc4c20f"}'::json;
+--_opt := '{"lyr_in":"processed.f20170718fagebdcf580ac83_nsi"}'::json;
 
-_min_sup := COALESCE((_opt->>'min_sup')::real, 0.002); --> Esta superficie es la menor existente en la BD
 _tolerance := COALESCE((_opt->>'tolerance')::text, '5.3');
 tbl_name := (_opt->>'lyr_in')::text;
 	SELECT (sicob_split_table_name(tbl_name)).table_name INTO tbl_name ;
 _condition := COALESCE( (_opt->>'condition')::text , 'TRUE');
 
-lyrs_predio := ARRAY[
-    					format('{"lyr":"%s","fldpredio":"%s","fldpropietario":"%s","subfix":"_tit"}',
-                        	'coberturas.predios_titulados', 
-                            'predio',
-                            'propietario')
-                        ,                        
-    					format('{"lyr":"%s","fldpredio":"%s","fldpropietario":"%s","subfix":"_pop","tolerance":"0"}',
-                        	'coberturas.predios_pop', 
-                            'nom_pre',
-                            'nom_pro')
-                        ,
-    					format('{"lyr":"%s","fldpredio":"%s","fldpropietario":"%s","subfix":"_proc","min_sup":"100","tolerance":"0"}',
-                        	'coberturas.predios_proceso_geosicob_geo_201607', 
-                            'nompred',
-                            'beneficiar')
-					];
-IF COALESCE( (_opt->>'lyr_pred')::text,'') <> '' THEN --> Si se indica cobertura de referencia.
-   	IF NOT sicob_exist_column(_opt->>'lyr_pred', COALESCE((_opt->>'fldpredio')::text, 'predio')) THEN
+lyrs_predio := '[{
+                  "lyr_parc":"coberturas.parcelas_tituladas",
+                  "fldpredio_parc":"predio",
+                  "fldpropietario_parc":"propietario",
+                  "fldidpredio_parc":"idpredio",
+                  "lyr_pred":"coberturas.predios_titulados",
+                  "fldidpredio_pred":"idpredio",
+                  "subfix":"_tit"
+                 },
+				 {
+                  "lyr_parc":"coberturas.tioc",
+                  "fldpredio_parc":"nomparcela",
+                  "fldpropietario_parc":"nomparcela",
+                  "fldidpredio_parc":"idpredio",
+                  "lyr_pred":"coberturas.predios_tioc",
+                  "fldidpredio_pred":"idpredio",
+                  "tolerance":"0",
+                  "subfix":"_tioc"
+                 },                 
+                 {
+                  "lyr_parc":"coberturas.predios_pop",
+                  "fldpredio_parc":"nom_pre",
+                  "fldpropietario_parc":"nom_pro",
+                  "tolerance":"0",
+                  "subfix":"_pop"
+                 },
+                 {
+                  "lyr_parc":"coberturas.predios_proceso_geosicob_geo_201607",
+                  "fldpredio_parc":"nompred",
+                  "fldpropietario_parc":"beneficiar",
+                  "fldidpredio_parc":"idpredio",
+                  "lyr_pred":"coberturas.predios_referenciales",
+                  "fldidpredio_pred":"sicob_id",
+                  "tolerance":"0",
+                  "subfix":"_proc"
+                 }]'::json;
+                 
+IF COALESCE( (_opt->>'lyr_parc')::text,'') <> '' THEN --> Si se indica cobertura de referencia.
+   	IF NOT sicob_exist_column(_opt->>'lyr_parc', COALESCE((_opt->>'fldpredio_parc')::text, 'predio')) THEN
        	_fldpredio := '''COLUMNA NO ENCONTRADA''';
    	END IF;
-   	IF NOT sicob_exist_column(_opt->>'lyr_pred', COALESCE((_opt->>'fldpropietario')::text, 'propietario')) THEN
+   	IF NOT sicob_exist_column(_opt->>'lyr_parc', COALESCE((_opt->>'fldpropietario_parc')::text, 'propietario')) THEN
       	_fldpropietario := '''COLUMNA NO ENCONTRADA''';
    	END IF;
-	lyr_predio := format('{"lyr":"%s","fldpredio":"%s","fldpropietario":"%s","subfix":"_ref"}',
-                        	(_opt->>'lyr_pred')::text, 
-                            _fldpredio,
-                            _fldpropietario
-                  );
-	SELECT array_prepend(lyr_predio::json , lyrs_predio::json[]) INTO lyrs_predio;
+	lyr_predio :=   ('{
+                        "lyr_parc":"' || (_opt->>'lyr_parc')::text || '",
+                        "fldpredio_parc":"' || _fldpredio || '",
+                        "fldpropietario_parc":"' || _fldpropietario || '",
+                        "subfix":"_parc"}')::json;
+
+    lyrs_predio := (lyr_predio::jsonb || lyrs_predio::jsonb)::json;
+
 END IF;
 
-find_cnt := 0;                  
+inters_cnt := 0;                  
 a := (_opt->>'lyr_in')::text;  
---> ANALIZANDO CADA COBERTURA DE PREDIOS 
-FOR i IN array_lower(lyrs_predio, 1)..array_upper(lyrs_predio, 1) LOOP        
-    lyr_predio := lyrs_predio[i]; --> Obteniendo los datos de procesamiento de la cobertura de predios.
-	IF a <> '' AND lyr_predio->>'lyr' <> '' THEN --> Si existen poligonos para localizar.
+--> ANALIZANDO CADA COBERTURAS DE PREDIOS/PARCELAS 
+FOR lyr_predio IN SELECT * FROM json_array_elements(lyrs_predio) LOOP
+	IF a <> '' AND lyr_predio->>'lyr_parc' <> '' THEN --> Si existen poligonos para localizar.
     	_out := sicob_overlap(('{"a":"' || a || 
         			'","condition_a":"' || _condition || 
-                    '","b":"' || (lyr_predio->>'lyr')::text || 
+                    '","b":"' || (lyr_predio->>'lyr_parc')::text || 
                     '","subfix":"' || (lyr_predio->>'subfix')::text || 
                     '","tolerance":"' || COALESCE((lyr_predio->>'tolerance')::text, _tolerance ) || 
-                    '","add_diff":true,"temp" : true, ' || 
-                    '"min_sup":"' || COALESCE((lyr_predio->>'min_sup')::text, '0') ||
-                    '"}')::json); 
+                    '","add_diff":true,"temp" : true' || 
+                    '}')::json); 
         IF COALESCE( (_out->>'features_inters_cnt')::int,0) > 0 THEN  --> Si se han localizado predios.
         
-        	find_cnt := find_cnt +  (_out->>'features_inters_cnt')::int;
+        	inters_cnt := inters_cnt +  (_out->>'features_inters_cnt')::int;
        
         	IF a <> (_opt->>'lyr_in')::text THEN --> Actualizar referencia de la tabla resultado.
                 -->Cambiando la referencia "id_a" de "a" hacia la tabla de entrada "_lyr_in"
@@ -121,8 +143,8 @@ FOR i IN array_lower(lyrs_predio, 1)..array_upper(lyrs_predio, 1) LOOP
                 ',_out->>'lyr_over',a, (_opt->>'lyr_in')::text);
             END IF;
             
-        	_fldpredio := (lyr_predio->>'fldpredio')::text;
-        	_fldpropietario := (lyr_predio->>'fldpropietario')::text;
+        	_fldpredio := (lyr_predio->>'fldpredio_parc')::text;
+        	_fldpropietario := (lyr_predio->>'fldpropietario_parc')::text;
             
             sql := format('
                     SELECT 
@@ -134,91 +156,52 @@ FOR i IN array_lower(lyrs_predio, 1)..array_upper(lyrs_predio, 1) LOOP
                     CAST(%s AS text) as propietario, ' ||
                     CASE (lyr_predio->>'subfix')::text WHEN '_tit' 
                     	THEN 'titulo' 
-                        ELSE 'CAST(NULL AS text) as titulo' 
-                    END || ', ' ||
+                        ELSE 'CAST(NULL AS text)' 
+                    END || ' as titulo, ' ||
                     CASE (lyr_predio->>'subfix')::text WHEN '_tit' 
-                    	THEN 'fecha_titulo' 
-                        ELSE 'CAST(NULL AS timestamp with time zone) AS fecha_titulo' 
-                    END || ', ' || 
-                    CASE (lyr_predio->>'subfix')::text WHEN '_tit' 
-                    	THEN 'tipo_propiedad' 
-                        ELSE 'CAST(NULL AS text) AS tipo_propiedad' 
-                    END || ', ' ||
+                    	THEN 'to_char(fecha_titulo,''DD/MM/YYYY'')' 
+                        ELSE 'CAST(NULL AS TEXT)' 
+                    END || ' AS fecha_titulo, ' || 
                     CASE (lyr_predio->>'subfix')::text 
-                    	WHEN '_ref'	THEN 'sicob_sup AS sup_predio'
+                    	WHEN '_tit' THEN 'tipo_propiedad'
+                        WHEN '_tioc' THEN 'CAST(''Territorio Indígena Originario Campesino'' as text)' 
+                        ELSE 'CAST(NULL AS text)' 
+                    END || ' AS tipo_propiedad, ' ||
+                    CASE (lyr_predio->>'subfix')::text 
+                    	WHEN '_parc'	THEN 'sicob_sup'
                         WHEN '_tit'	THEN 'sup_predio'
-                        WHEN '_pop' THEN 'sup_pre AS sup_predio' 
-                        WHEN '_proc' THEN 'sicob_sup AS sup_predio' 
-                        ELSE 'CAST(NULL AS float) AS sup_predio' 
-                    END || ', ' ||
+                        WHEN '_pop' THEN 'CASE sup_pre > 0 WHEN TRUE THEN sup_pre ELSE sicob_sup END' 
+                        WHEN '_proc' THEN 'sicob_sup' 
+                        ELSE 'CAST(NULL AS float)' 
+                    END || ' AS sup_predio, ' ||
+                    CASE (lyr_predio->>'subfix')::text 
+                    	WHEN '_parc'	THEN _fldpredio || '::text'
+                    	ELSE 'CAST(NULL AS text)'
+                    END || ' AS parcela, ' ||
                     CASE (lyr_predio->>'subfix')::text WHEN '_pop' 
-                    	THEN 'res_adm AS resol_pop' 
-                        ELSE 'CAST(NULL AS text) AS resol_pop' 
-                    END || ', ' ||
+                    	THEN 'res_adm' 
+                        ELSE 'CAST(NULL AS text)' 
+                    END || ' AS resol_pop, ' ||
                     CASE (lyr_predio->>'subfix')::text WHEN '_pop' 
-                    	THEN 'fec_res AS fec_resol_pop' 
-                        ELSE 'CAST(NULL  AS timestamp with time zone) AS fec_resol_pop' 
-                    END || ', ' ||
+                    	THEN 'to_char(fec_res,''DD/MM/YYYY'')' 
+                        ELSE 'CAST(NULL  AS text)' 
+                    END || ' AS fec_resol_pop, ' ||
+                    'CAST(''' || COALESCE((lyr_predio->>'lyr_pred')::text, (lyr_predio->>'lyr_parc')::text ) || ''' AS text) AS source_predio, ' ||
+                    COALESCE((lyr_predio->>'fldidpredio_parc')::text, 'id_b' ) || ' AS id_predio, ' ||
                     'the_geom
                     FROM
                         %s
                     WHERE id_b IS NOT NULL         
                     ',_fldpredio,_fldpropietario, (_out->>'lyr_over')::text);
+                    
+            RAISE DEBUG 'Running %', sql;
         	IF createdResult THEN
 				EXECUTE 'INSERT INTO ' || tbl_name || '_ppred ' || sql;
             ELSE
                 EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_name || '_ppred' || ' ON COMMIT DROP AS ' || sql;
-        	END IF;
---> CREANDO LA COBERTURA TEMPORAL DE PREDIOS
-            sql := format('
-                    SELECT 
-                    sicob_id as id_predio,
-                    CAST(''%s'' AS text) AS source_predio,           
-                    CAST(%s AS text) as predio,
-                    CAST(%s AS text) as propietario, ' ||
-                    CASE (lyr_predio->>'subfix')::text WHEN '_tit' 
-                    	THEN 'titulo' 
-                        ELSE 'CAST(NULL AS text) as titulo' 
-                    END || ', ' ||
-                    CASE (lyr_predio->>'subfix')::text WHEN '_tit' 
-                    	THEN 'fecha_titulo' 
-                        ELSE 'CAST(NULL AS timestamp with time zone) AS fecha_titulo' 
-                    END || ', ' || 
-                    CASE (lyr_predio->>'subfix')::text WHEN '_tit' 
-                    	THEN 'tipo_propiedad' 
-                        ELSE 'CAST(NULL AS text) AS tipo_propiedad' 
-                    END || ', ' ||
-                    CASE (lyr_predio->>'subfix')::text 
-                    	WHEN '_ref'	THEN 'sicob_sup AS sup_predio'
-                        WHEN '_tit'	THEN 'sup_predio'
-                        WHEN '_pop' THEN 'sup_pre AS sup_predio' 
-                        WHEN '_proc' THEN 'sicob_sup AS sup_predio' 
-                        ELSE 'CAST(NULL AS float) AS sup_predio' 
-                    END || ', ' ||
-                    CASE (lyr_predio->>'subfix')::text WHEN '_pop' 
-                    	THEN 'res_adm AS resol_pop' 
-                        ELSE 'CAST(NULL AS text) AS resol_pop' 
-                    END || ', ' ||
-                    CASE (lyr_predio->>'subfix')::text WHEN '_pop' 
-                    	THEN 'fec_res AS fec_resol_pop' 
-                        ELSE 'CAST(NULL  AS timestamp with time zone) AS fec_resol_pop' 
-                    END || ', ' ||
-                    'ST_Multi(the_geom) AS the_geom
-                    FROM
-                        %s
-                    WHERE
-                    	sicob_id IN (
-                        	SELECT id_b FROM %s WHERE id_b IS NOT NULL
-                        )        
-                    ',(lyr_predio->>'lyr')::text,_fldpredio,_fldpropietario,(lyr_predio->>'lyr')::text, (_out->>'lyr_over')::text);
-        	IF createdResult THEN
-				EXECUTE 'INSERT INTO temp.' || tbl_name || '_pred ' || sql;
-            ELSE
-            	EXECUTE 'DROP TABLE IF EXISTS temp.' || tbl_name || '_pred'; 
-                EXECUTE 'CREATE TABLE temp.' || tbl_name || '_pred' || ' AS ' || sql;
                 createdResult := TRUE;
         	END IF;
-           
+          
             IF COALESCE( (_out->>'features_diff_cnt')::int,0) > 0 THEN --> si existen poligonos NO encontrados.
             	a := (_out->>'lyr_over')::text;
                 _condition := 'id_b IS NULL';
@@ -229,7 +212,38 @@ FOR i IN array_lower(lyrs_predio, 1)..array_upper(lyrs_predio, 1) LOOP
     END IF;
 END LOOP;
 
-IF find_cnt > 0 THEN --> Si se han encontrado poligonos.
+--> ADICIONANDO LOS POLIGONOS SIN PREDIO
+IF COALESCE( (_out->>'features_diff_cnt')::int,0) > 0 THEN --> si existen poligonos NO encontrados.
+  sql := format('
+      SELECT 
+      id_a,
+      source_a,
+      id_b,
+      source_b,            
+      NULL as predio,
+      NULL as propietario, 
+      CAST(NULL AS text) AS titulo, 
+      CAST(NULL AS TEXT) AS fecha_titulo, 
+      CAST(NULL AS text) AS tipo_propiedad,
+      CAST(NULL AS float) AS sup_predio,
+      CAST(NULL AS text) AS parcela,
+      CAST(NULL AS text) AS resol_pop, 
+      CAST(NULL  AS text) AS fec_resol_pop,
+      CAST(NULL AS text) AS source_predio,
+      CAST(NULL AS integer) AS id_predio, 
+      the_geom
+      FROM
+          %s
+      WHERE id_b IS NULL         
+      ',(_out->>'lyr_over')::text);
+      RAISE DEBUG 'Running %', sql;
+      IF createdResult THEN
+          EXECUTE 'INSERT INTO ' || tbl_name || '_ppred ' || sql;
+      ELSE
+          EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_name || '_ppred' || ' ON COMMIT DROP AS ' || sql;
+          createdResult := TRUE;
+      END IF;
+END IF;
 
 	--> CREANDO LA COBERTURA RESULTANTE Y AGREGANDO LOS CAMPOS DE LA CAPA DE ENTRADA.
     sql := 'SELECT  
@@ -239,13 +253,16 @@ IF find_cnt > 0 THEN --> Si se han encontrado poligonos.
 		r.fecha_titulo,
   		r.sup_predio,
   		r.tipo_propiedad,
+        r.parcela,
   		r.resol_pop,
   		r.fec_resol_pop,
-        r.source_b as source_predio,
-        r.id_b as id_predio,' || 
+        cast(r.source_b as text) as source_parcela,
+        r.id_b as id_parcela,
+        cast(r.source_predio as text) as source_predio,
+        r.id_predio, ' || 
     	sicob_no_geo_column(
         	(_opt->>'lyr_in') ,
-            '{sicob_id, predio, propietario, titulo, fecha_titulo, sup_predio, tipo_propiedad, resol_pop, fec_resol_pop, sicob_sup, sicob_utm, id_predio, source_predio}',
+            '{sicob_id, predio, propietario, titulo, fecha_titulo, sup_predio, tipo_propiedad, parcela, resol_pop, fec_resol_pop, sicob_sup, sicob_utm, id_predio, source_parcela, id_parcela, source_predio}',
         	--> ('{' || sicob_no_geo_column((_opt->>'lyr_over')::text ,'{}',' '::text) || '}')::text[],
             'a.'
         ) || 
@@ -270,17 +287,19 @@ IF find_cnt > 0 THEN --> Si se han encontrado poligonos.
 		';  
 	EXECUTE 'DROP TABLE IF EXISTS ' || a; 
     EXECUTE 'CREATE TABLE ' || a || ' AS ' || sql;
-	GET DIAGNOSTICS _row_cnt = ROW_COUNT;
+    
 --> CREANDO INDICE GEOGRAFICO
     sql := 'CREATE INDEX ' || tbl_name || '_ppred_geomidx
 	ON ' || a || '  
 	USING GIST (the_geom) ';
 	RAISE DEBUG 'Running %', sql;
-	EXECUTE sql;           
---> AGREGANDO INFORMACION DE POP A LOS POLIGONOS TITULADOS Y DE REFERENCIA
-	_condition := 'source_predio = ''coberturas.predios_titulados''';    
-	IF COALESCE( (_opt->>'lyr_pred')::text,'') <> '' THEN --> Si se indica cobertura de referencia.
-    	_condition := _condition || ' OR source_predio = ''' || (_opt->>'lyr_pred')::text || '''';
+	EXECUTE sql;
+   
+IF inters_cnt > 0 THEN --> Si se han encontrado poligonos.               
+--> AGREGANDO INFORMACION DE POP A LOS POLIGONOS TITULADOS Y POLIGONOS UBICADOS EN PARCELAS DE REFERENCIA
+	_condition := 'source_parcela = ''coberturas.parcelas_tituladas''';    
+	IF COALESCE( (_opt->>'lyr_parc')::text,'') <> '' THEN --> Si se indica cobertura de referencia.
+    	_condition := _condition || ' OR source_parcela = ''' || (_opt->>'lyr_parc')::text || '''';
     END IF;
     tmp := sicob_overlap(('{"a":"' || a || '","condition_a":"' || _condition || '","b":"coberturas.predios_pop","subfix":"_pop","tolerance":"0","add_diff":false, "temp": true}')::json);
     IF COALESCE( (tmp->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado POP.
@@ -295,15 +314,25 @@ IF find_cnt > 0 THEN --> Si se han encontrado poligonos.
         EXECUTE sql;            
     END IF;
     
---> AGREGANDO INFORMACION DE TITULACION A LOS POLIGONOS DE REFERENCIA
-	IF COALESCE( (_opt->>'lyr_pred')::text,'') <> '' THEN --> Si se indica cobertura de referencia.
-    	_condition := 'source_predio = ''' || (_opt->>'lyr_pred')::text || '''';
-        tmp := sicob_overlap(('{"a":"' || a || '","condition_a":"' || _condition || '","b":"coberturas.predios_titulados","subfix":"_tit","tolerance":"0","add_diff":false, "temp": true}')::json);
-        IF COALESCE( (tmp->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado POP.
+--> AGREGANDO INFORMACION DE TITULACION A LOS POLIGONOS UBICADOS EN PARCELAS DE REFERENCIA
+	IF COALESCE( (_opt->>'lyr_parc')::text,'') <> '' THEN --> Si se indica cobertura de referencia.
+    	_condition := 'source_parcela = ''' || (_opt->>'lyr_parc')::text || '''';
+        tmp := sicob_overlap(('{"a":"' || a || '","condition_a":"' || _condition || '","b":"coberturas.parcelas_tituladas","subfix":"_tit","tolerance":"0","add_diff":false, "temp": true}')::json);
+        IF COALESCE( (tmp->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado parcelas tituladas.
             sql := '
                 UPDATE ' || a || ' a
-                SET titulo = b.titulo, fecha_titulo = b.fecha_titulo, sup_predio = b.sup_predio, tipo_propiedad = b.tipo_propiedad
-                FROM ' || (tmp->>'lyr_over')::text || ' b
+                SET titulo = b.titulo, fecha_titulo = b.fecha_titulo, tipo_propiedad = b.tipo_propiedad,
+                predio = CASE WHEN round ( abs(b.sup_predio - a.sup_predio)*100/b.sup_predio) < 5 THEN b.predio ELSE a.predio END,
+                propietario = CASE WHEN round ( abs(b.sup_predio - a.sup_predio)*100/b.sup_predio) < 5 THEN b.propietario ELSE a.propietario END,
+                sup_predio = CASE WHEN round ( abs(b.sup_predio - a.sup_predio)*100/b.sup_predio) < 5 THEN b.sup_predio ELSE a.sup_predio END,
+                source_predio = CASE WHEN round ( abs(b.sup_predio - a.sup_predio)*100/b.sup_predio) < 5 THEN ''coberturas.predios_titulados'' ELSE a.source_predio END,
+                id_predio = CASE WHEN round ( abs(b.sup_predio - a.sup_predio)*100/b.sup_predio) < 5 THEN b.idpredio ELSE a.id_predio END
+                FROM (
+                  SELECT id_a, min(idpredio) as idpredio, string_agg(predio , '', '') as predio, string_agg(propietario , '', '') as propietario, string_agg(titulo , '', '') as titulo, string_agg(to_char(fecha_titulo,''DD/MM/YYYY'') , '', '') as fecha_titulo, min(tipo_propiedad) as tipo_propiedad, sum(sup_predio) as sup_predio
+                  FROM
+                    ' || (tmp->>'lyr_over')::text || '
+                  GROUP BY id_a                
+                ) b
                 WHERE
                 b.id_a = a.sicob_id
             ';
@@ -311,12 +340,14 @@ IF find_cnt > 0 THEN --> Si se han encontrado poligonos.
             EXECUTE sql;            
         END IF;
     END IF;
-
+END IF;
     
     --AGREGANDO LA GEOINFORMACION
 	PERFORM sicob_add_geoinfo_column(a);
     PERFORM sicob_update_geoinfo_column(a);
+
 	--Eliminando poligonos con superfice menor a la mínima.
+    _min_sup := COALESCE((_opt->>'min_sup')::real, 0.002); --> La superficie 0.002 es la menor existente en la BD.
     IF _min_sup > 0 THEN
     	sql := 'DELETE FROM ' || a || 
         ' WHERE sicob_sup < ' || _min_sup::text;
@@ -332,13 +363,13 @@ IF find_cnt > 0 THEN --> Si se han encontrado poligonos.
                     order by sicob_id
                 ) t
             ';
-            EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_name || '_newidx' || ' ON COMMIT DROP AS ' || sql;
+            EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_name || '_newid' || ' ON COMMIT DROP AS ' || sql;
             
         	sql := '
             	UPDATE ' || a || ' a
             	SET sicob_id = (
                 	SELECT new_sicob_id
-                    FROM ' || tbl_name || '_newidx
+                    FROM ' || tbl_name || '_newid
                     WHERE sicob_id = a.sicob_id
             	)
             ';
@@ -346,45 +377,153 @@ IF find_cnt > 0 THEN --> Si se han encontrado poligonos.
             EXECUTE sql;
         END IF;
     END IF;    
-
-    _out := _out::jsonb || ('{"features_inters_cnt":"' || find_cnt::text || 
-    '", "features_diff_cnt":"' || (_row_cnt - find_cnt)::text || 
-    '", "lyr_over":"' || a || '", "lyr_pred":"temp.' || tbl_name || '_pred"}')::jsonb;
     
+    -->OBTENIENDO LA CANTIDAD DE POLIGONOS ENCONTRADOS.
+    EXECUTE 'SELECT count(*) as cnt FROM ' || a || ' WHERE predio IS NOT NULL' INTO inters_cnt;
+    -->OBTENIENDO LA CANTIDAD DE POLIGONOS SIN PREDIO ENCONTRADO.
+    EXECUTE 'SELECT count(*) as cnt FROM ' || a || ' WHERE predio IS NULL' INTO diff_cnt;
+    
+    _out := _out::jsonb || ('{"features_inters_cnt":"' || inters_cnt::text || 
+    '", "features_diff_cnt":"' || diff_cnt::text || 
+    '", "lyr_over":"' || a || '"}')::jsonb;
+
+IF inters_cnt > 0 THEN --> Si se han encontrado poligonos.                  
 	-->CREANDO EL DETALLE DE LOS PREDIOS ENCONTRADOS
+    createdResult := FALSE;
+    FOR lyr_predio IN SELECT * FROM json_array_elements(lyrs_predio) LOOP 
+    	sql := '
+            WITH ref_pred AS (
+                SELECT 
+                  predio,
+                  propietario,         
+                  source_predio,
+                  id_predio
+                FROM
+                  ' || a || ' a
+                WHERE
+                	source_predio = ''' || COALESCE((lyr_predio->>'lyr_pred')::text, (lyr_predio->>'lyr_parc')::text) || '''
+                GROUP BY
+                  predio,
+                  propietario,
+                  source_predio,
+                  id_predio
+                order by  predio, propietario
+            ),
+            pred AS (
+                SELECT a.predio, a.propietario, a.source_predio, a.id_predio,' ||
+                  	CASE (lyr_predio->>'subfix')::text WHEN '_tit' 
+                    	THEN 'b.titulo' 
+                        ELSE 'CAST(NULL AS text)' 
+                    END || ' as titulo, ' ||
+                    CASE (lyr_predio->>'subfix')::text WHEN '_tit' 
+                    	THEN 'b.fecha_titulo' 
+                        ELSE 'CAST(NULL AS TEXT)' 
+                    END || ' AS fecha_titulo, ' || 
+                    CASE (lyr_predio->>'subfix')::text WHEN '_tit' 
+                    	THEN 'b.tipo_propiedad' 
+                        ELSE 'CAST(NULL AS text)' 
+                    END || ' AS tipo_propiedad, ' ||
+                    CASE (lyr_predio->>'subfix')::text 
+                    	WHEN '_ref'	THEN 'b.sicob_sup'
+                        WHEN '_tit'	THEN 'b.sup_predio'
+                        WHEN '_pop' THEN 'b.sup_pre' 
+                        WHEN '_proc' THEN 'b.sicob_sup' 
+                        ELSE 'CAST(NULL AS float)' 
+                    END || ' AS sup_predio, ' ||                
+                ' st_multi(b.the_geom) as the_geom
+                FROM
+                	ref_pred a INNER JOIN ' || COALESCE((lyr_predio->>'lyr_pred')::text, (lyr_predio->>'lyr_parc')::text) || ' b ON 
+                (b.' || COALESCE((lyr_predio->>'fldidpredio_pred')::text, 'sicob_id' ) || ' = a.id_predio)
+            )
+            SELECT row_number() over() AS sicob_id,* from pred;';
+            RAISE DEBUG 'Running %', sql;
+        	IF createdResult THEN
+				EXECUTE 'INSERT INTO temp.' || tbl_name || '_pred ' || sql;
+            ELSE
+            	EXECUTE 'DROP TABLE IF EXISTS temp.' || tbl_name || '_pred'; 
+                EXECUTE 'CREATE TABLE temp.' || tbl_name || '_pred' || ' AS ' || sql;
+                createdResult := TRUE;
+        	END IF;
+    END LOOP;
+
+	--> AGREGANDO INFORMACION DE TITULACION A LOS PREDIOS CARGADOS POR EL USUARIO
+	IF COALESCE( (_opt->>'lyr_parc')::text,'') <> '' THEN --> Si se indica cobertura de referencia.
+    	_condition := 'source_predio = ''' || (_opt->>'lyr_parc')::text || '''';
+        tmp := sicob_overlap(('{"a":"temp.' || tbl_name || '_pred","condition_a":"' || _condition || '","b":"coberturas.parcelas_tituladas","subfix":"_tit","tolerance":"0","add_diff":false, "temp": true}')::json);
+        IF COALESCE( (tmp->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado parcelas tituladas.
+            sql := '
+                UPDATE temp.' || tbl_name || '_pred a
+                SET titulo = b.titulo, fecha_titulo = b.fecha_titulo, tipo_propiedad = b.tipo_propiedad
+                FROM (
+                  SELECT id_a, min(idpredio) as idpredio, string_agg(predio , '', '') as predio, string_agg(propietario , '', '') as propietario, string_agg(titulo , '', '') as titulo, string_agg(to_char(fecha_titulo,''DD/MM/YYYY'') , '', '') as fecha_titulo, min(tipo_propiedad) as tipo_propiedad, sum(sup_predio) as sup_predio
+                  FROM
+                    ' || (tmp->>'lyr_over')::text || '
+                  GROUP BY id_a                
+                ) b
+                WHERE
+                b.id_a = a.sicob_id
+            ';
+            RAISE DEBUG 'Running %', sql;
+            EXECUTE sql;            
+        END IF;
+    END IF;
+
+
+    -->GENERANDO EL JSON DE INFORMACION DE PREDIOS           
     sql := '
       SELECT row_to_json(u)
       FROM
       (
           SELECT array_to_json(array_agg(t)) as predios, count(t.*) as total_predios FROM 
           (
-              SELECT
-                a.id_predio,  
-                a.predio,
-                a.source_predio,
-                a.propietario,
-                a.titulo,
-                a.fecha_titulo,
-                a.resol_pop,
-                a.fec_resol_pop,
-                a.sup_predio
+              SELECT ' || 
+              sicob_no_geo_column(
+              	'temp.' || tbl_name || '_pred',
+                '{}',
+                'a.'
+              ) || '
               FROM
                 temp.' || tbl_name || '_pred a
-              ORDER BY a.source_predio, a.id_predio
+              ORDER BY a.source_predio, a.predio
           ) t
       )u
     ';   
     RAISE DEBUG 'Running %', sql;
-    EXECUTE sql INTO tmp;
-    _out := tmp::jsonb || _out::jsonb; 
+    EXECUTE sql INTO tmp; 
+    _out := _out::jsonb || ('{"lyr_pred":"temp.' || tbl_name || '_pred"}')::jsonb || tmp::jsonb;
+END IF;
+
     
-	--ADICIONANDO RESULTADO EN FORMATO GEOJSON
     IF COALESCE((_opt->>'geojson')::boolean,FALSE) = TRUE THEN
+    	-->ADICIONANDO RESULTADO EN FORMATO GEOJSON
     	EXECUTE 'SELECT sicob_to_geojson(''{"lyr_in":"' ||  a || '"}'') AS geojson' INTO _geojson;
         _out := _out::jsonb || jsonb_build_object('lyr_geojson', _geojson::json); 
+    ELSE
+    	IF inters_cnt > 0 THEN --> Si se han encontrado poligonos.
+     --> ADICIONANDO LA INFORMACION DE LOS POLIGONOS + PREDIOS                   
+            sql := '
+              SELECT row_to_json(u)
+              FROM
+              (
+                  SELECT array_to_json(array_agg(t)) as poligonos FROM 
+                  (
+                      SELECT ' || 
+                      sicob_no_geo_column(
+                        'temp.' || tbl_name || '_ppred',
+                        '{}',
+                        'a.'
+                      ) || '
+                      FROM
+                        temp.' || tbl_name || '_ppred a
+                      ORDER BY a.source_predio, a.predio
+                  ) t
+              )u
+            ';   
+            RAISE DEBUG 'Running %', sql;
+            EXECUTE sql INTO tmp;
+            _out := tmp::jsonb || _out::jsonb;
+		END IF;
 	END IF;        
-  
-END IF;
 
 RETURN _out;
 	
