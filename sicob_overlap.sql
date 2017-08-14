@@ -17,7 +17,7 @@ DECLARE
  tbl_nameB text; sch_nameB text;
  tbl_subfixDiff text; tbl_subfixResult text;
  row_cnt integer;
- __a text; id__a text;
+ __a text; id__a text; __b text;
  _out json := '{}';
  -------------------------------
   arrcol  varchar[];
@@ -39,7 +39,7 @@ BEGIN
 --> add_diff (opcional true/false): Agrega o no los polígono que no se intersectan a la  capa resultado. Se asigna "NULL" a los campos de atributos para esos polígonos. 
 --> temp (opcional true/false) : Indica si la capa resultante será temporal mientras dura la transacción. Esto se requiere cuando el resultado es utilizado como capa intermedia en otros procesos dentro de la misma transacción.
 --> add_sup_total (opcional true/false): Calcula y devuelve la superficie total sobrepuesta en hectareas.
---> min_sup (opcional): Superficie minima (en hectareas) permitida para los poligonos de la capa resultado.
+--> min_sup (opcional): Superficie minima (en hectareas) permitida para los poligonos de la capa resultado, solo se aplica si se el parametro add_geoinfo es TRUE.
 --> filter_overlap (opcional true/false) : Indica si se permite o no sobreposicion de poligonos en la capa resultado. Por defecto es TRUE.
 ---------------------------
 --VALORES DEVUELTOS
@@ -78,6 +78,17 @@ _opt := '{"a":"processed.pdm_pred","condition_a":"titulo IS NULL","b":"cobertura
 /*
 _opt := '{"a":"processed.f20160829ecadgfb05235623_nsi","b":"coberturas.predios_titulados","subfix":"_pop","tolerance":"5.3","add_diff":true, "schema":"temp"}';
 */
+/*
+_opt := '{"a":"processed.f20170718fagebdcf580ac83_nsi","b":"coberturas.predios_titulados","subfix":"_tit","tolerance":"5.3","add_diff":true, "schema":"temp"}';
+*/
+
+/*
+_opt := '{"a":"uploads.f20170727dabcgefcfe22301","b":"coberturas.parcelas_tituladas","subfix":"_tit","tolerance":"0","add_diff":true, "schema":"temp"}';
+*/
+
+/*
+_opt := '{"a":"temp.f20170718fagebdcf580ac83_nsi_overlap","b":"coberturas.tioc","schema":"temp","temp":false,"add_diff":true,"tolerance":"5.2"}';
+*/
 
 a := (_opt->>'a')::TEXT;
 b := (_opt->>'b')::TEXT;
@@ -101,6 +112,41 @@ IF COALESCE((_opt->>'temp')::boolean,FALSE) = TRUE THEN
 	tbl_subfixResult := tbl_nameA || _subfixResult;
 ELSE
 	tbl_subfixResult := _schema || '.' || tbl_nameA || _subfixResult;
+END IF;
+
+--> CREANDO EL SUBCONJUNTO DE "b" QUE SE INTERSECTA CON "a"
+__b := '__b';
+colsname := sicob_no_geo_column(b::text,'{id_a,source_a,id_b,source_b}','b.');
+
+s := COALESCE((_opt->>'condition_b')::text, '');
+IF (s <> '') THEN
+	arrcol := string_to_array(colsname, ',') ;
+	FOREACH col IN ARRAY arrcol LOOP
+    	s := replace(s, col, 'b.' || col);
+	END LOOP;
+    s := '(' || s || ')';
+ELSE
+	s := 'TRUE';
+END IF;
+
+sql := '
+SELECT b.*
+FROM 
+' || b::text || ' b INNER JOIN ' || a::text || ' a
+ON (
+	(' || s || ') AND st_intersects(a.the_geom, b.the_geom)
+)
+limit 50'; --> para evitar proceso largos.
+
+RAISE DEBUG 'Running %', sql;
+EXECUTE 'DROP TABLE IF EXISTS ' || __b;
+EXECUTE 'CREATE TEMPORARY TABLE ' || __b || ' ON COMMIT DROP AS ' || sql;
+
+GET DIAGNOSTICS row_cnt = ROW_COUNT; -->obteniendo la cantidad de poligonos que se intersectan
+
+IF row_cnt > 0 THEN --> Si existe interseccion
+	--CREANDO EL INDICE ESPACIAL
+	sql := 'CREATE INDEX __b_the_geom_idx ON ' || __b || ' USING gist (the_geom public.gist_geometry_ops_2d)';	
 END IF;
 
 -->__a := 'temp.__a';
@@ -203,7 +249,7 @@ sql := '
 WITH 
 a_intersect_b AS (
 SELECT 
-	row_number() over() AS ___$, ' ||
+	row_number() over() AS ___o, ' ||
   'a.' || id__a || ' as id_a, ''' || a::text || ''' as source_a, 
   b.sicob_id as id_b, ''' || b::text || ''' as source_b,
   CASE 
@@ -229,17 +275,17 @@ overlayed AS (
         --filtrando los polignos que se sobreponenen en la misma capa
             SELECT 
             CASE WHEN st_area(b1.the_geom) < st_area(b2.the_geom) THEN
-                b1.___$
+                b1.___o
             ELSE
-                b2.___$
+                b2.___o
             END as id
             FROM
                 a_intersect_b b1,
                 a_intersect_b b2
             WHERE 
             	' || COALESCE((_opt->>'filter_overlap')::text, 'TRUE') || ' AND
-                b1.___$ <> b2.___$ and
-                b1.___$ < b2.___$ and
+                b1.___o <> b2.___o and
+                b1.___o < b2.___o and
                 ST_Intersects(b1.the_geom,b2.the_geom) 
                 AND NOT ST_Touches(b1.the_geom, b2.the_geom)
 ),
@@ -250,12 +296,12 @@ spikeclean AS (
     	sicob_spikeremover(the_geom, 0.01) as the_geom
 	FROM a_intersect_b b
     WHERE
-    	___$ NOT IN (SELECT id FROM overlayed)
+    	___o NOT IN (SELECT id FROM overlayed)
 )
 SELECT * FROM spikeclean
     WHERE st_geometrytype(the_geom) in (''ST_Polygon'')
     AND trunc(st_area(the_geom)*10000000000) > 0';
- 
+    
 ------------------------------------------------
 --ALMACENADO LOS POLIGONOS EN LA COBERTURA DE RESULTADOS 
 ------------------------------------------------
