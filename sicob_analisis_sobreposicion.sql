@@ -10,7 +10,7 @@ DECLARE
   _superficie_in float;
   sql text;
   detalle json;
- _doanalisys text[] DEFAULT ARRAY['ATE', 'ASL', 'PGMF', 'POAF', 'POP', 'PDM', 'RF', 'RPPN', 'TPFP', 'PLUS', 'D337'];
+ _doanalisys text[] DEFAULT ARRAY['ATE', 'ASL', 'PGMF', 'POAF', 'POP', 'PDM', 'RF', 'RPPN', 'TPFP', 'PLUS', 'D337', 'DPAS', 'APN', 'APM'];
 
 BEGIN
 ---------------------------
@@ -200,7 +200,7 @@ END IF;
 IF 'RPPN' = ANY (_doanalisys) THEN
     _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.rppn","subfix":"_rppn","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado predios.
-        _aux := _aux::jsonb || ('{"lyr_b":"coberturas.rppn","nombre":"Reservas Privada de Patrimonio  Natural (RPPN)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
+        _aux := _aux::jsonb || ('{"lyr_b":"coberturas.rppn","nombre":"Reservas Privada de Patrimonio Natural (RPPN)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
             EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
             FROM (
                 SELECT ' || sicob_no_geo_column(_aux->>'lyr_over','{}','b.') || ',
@@ -316,6 +316,63 @@ IF 'D337' = ANY (_doanalisys) THEN
             ) q', _lyr_in, _aux->>'lyr_over') INTO detalle;
         _aux := _aux::jsonb || ('{"detalle":' || detalle || '}')::jsonb;
         _out := _out::jsonb || ('{"D337":' || _aux::text || '}')::jsonb; 
+    END IF;
+END IF;
+
+----------------------------------------------
+--Desmontes Ilegales con Proceso Administrativo Sancionatorio (DPAS)
+----------------------------------------------
+IF 'DPAS' = ANY (_doanalisys) THEN
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.dpas","subfix":"_dpas","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado desmontes.
+        _aux := _aux::jsonb || ('{"lyr_b":"coberturas.dpas","nombre":"Desmontes ilegales con Proceso Administrativo Sancionatorio (DPAS)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
+            EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
+            FROM (
+                SELECT ' || sicob_no_geo_column(_aux->>'lyr_over','{}','b.') || ',
+                    round(cast((b.sicob_sup * 100 / a.sicob_sup) as numeric),1) as PCTJE
+                FROM %s a, %s b
+                WHERE a.sicob_id = b.id_a
+            ) q', _lyr_in, _aux->>'lyr_over') INTO detalle;
+        _aux := _aux::jsonb || ('{"detalle":' || detalle || '}')::jsonb;
+        _out := _out::jsonb || ('{"DPAS":' || _aux::text || '}')::jsonb; 
+    END IF;
+END IF;
+
+----------------------------------------------
+--Areas Protegidas Nacionales (APN)
+----------------------------------------------
+IF 'APN' = ANY (_doanalisys) THEN
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.apn","subfix":"_apn","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado poligonos.
+        _aux := _aux::jsonb || ('{"lyr_b":"coberturas.apn","nombre":"Areas Protegidas Nacionales (APN)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
+            EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
+            FROM (
+                SELECT ' || sicob_no_geo_column(_aux->>'lyr_over','{}','b.') || ',
+                    round(cast((b.sicob_sup * 100 / a.sicob_sup) as numeric),1) as PCTJE
+                FROM %s a, %s b
+                WHERE a.sicob_id = b.id_a
+            ) q', _lyr_in, _aux->>'lyr_over') INTO detalle;
+        _aux := _aux::jsonb || ('{"detalle":' || detalle || '}')::jsonb;
+        _out := _out::jsonb || ('{"APN":' || _aux::text || '}')::jsonb; 
+    END IF;
+END IF;
+
+----------------------------------------------
+--Areas Protegidas Municipales (APM)
+----------------------------------------------
+IF 'APM' = ANY (_doanalisys) THEN
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.apm","subfix":"_apm","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado poligonos.
+        _aux := _aux::jsonb || ('{"lyr_b":"coberturas.apm","nombre":"Areas Protegidas Municipales (APM)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
+            EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
+            FROM (
+                SELECT ' || sicob_no_geo_column(_aux->>'lyr_over','{}','b.') || ',
+                    round(cast((b.sicob_sup * 100 / a.sicob_sup) as numeric),1) as PCTJE
+                FROM %s a, %s b
+                WHERE a.sicob_id = b.id_a
+            ) q', _lyr_in, _aux->>'lyr_over') INTO detalle;
+        _aux := _aux::jsonb || ('{"detalle":' || detalle || '}')::jsonb;
+        _out := _out::jsonb || ('{"APM":' || _aux::text || '}')::jsonb; 
     END IF;
 END IF;
 
