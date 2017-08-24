@@ -149,7 +149,7 @@ IF 'POP' = ANY (_doanalisys) THEN
          EXECUTE '
          SELECT array_to_json(array_agg(q)) as detalle
         FROM(
-         SELECT id_a as sicob_id, uso_pop, des_uso, sum(sicob_sup) as sicob_sup FROM ' || (_aux->>'lyr_over')::text || ' group by id_a,uso_pop,des_uso)q;' INTO detalle;
+         SELECT id_a as sicob_id, res_adm as resol_pop, uso_pop, des_uso, sum(sicob_sup) as sicob_sup FROM ' || (_aux->>'lyr_over')::text || ' group by id_a, res_adm, uso_pop,des_uso)q;' INTO detalle;
         _aux := _aux::jsonb || ('{"detalle":' || detalle || '}')::jsonb;
         _out := _out::jsonb || ('{"POP_USO":' || _aux::text || '}')::jsonb; 
     END IF;
