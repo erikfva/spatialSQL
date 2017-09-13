@@ -55,53 +55,69 @@ tbl_name := (_opt->>'lyr_in')::text;
 _condition := COALESCE( (_opt->>'condition')::text , 'TRUE');
 
 lyrs_predio := '[{
-                  "lyr_parc":"coberturas.parcelas_tituladas",
-                  "fldpredio_parc":"predio",
-                  "fldpropietario_parc":"propietario",
-                  "fldidpredio_parc":"idpredio",
-                  "lyr_pred":"coberturas.predios_titulados",
-                  "fldidpredio_pred":"idpredio",
-                  "subfix":"_tit"
-                 },
-				 {
-                  "lyr_parc":"coberturas.tioc",
-                  "fldpredio_parc":"nomparcela",
-                  "fldpropietario_parc":"nomparcela",
-                  "fldidpredio_parc":"idpredio",
-                  "lyr_pred":"coberturas.predios_tioc",
-                  "fldidpredio_pred":"idpredio",
-                  "tolerance":"0",
-                  "subfix":"_tioc"
-                 },                 
-                 {
-                  "lyr_parc":"coberturas.predios_pop",
-                  "fldpredio_parc":"nom_pre",
-                  "fldpropietario_parc":"nom_pro",
-                  "tolerance":"0",
-                  "subfix":"_pop"
-                 },
-                 {
-                  "lyr_parc":"coberturas.predios_proceso_geosicob_geo_201607",
-                  "fldpredio_parc":"nompred",
-                  "fldpropietario_parc":"beneficiar",
-                  "fldidpredio_parc":"idpredio",
-                  "lyr_pred":"coberturas.predios_referenciales",
-                  "fldidpredio_pred":"sicob_id",
-                  "tolerance":"0",
-                  "subfix":"_proc"
-                 }]'::json;
+    	"subfix":"_tit",
+        "lyr_parc":{
+        	"source":"coberturas.parcelas_tituladas",
+            "fldidpredio":"idpredio",
+            "fldpredio":"predio",
+            "fldpropietario":"propietario"
+        },
+        "lyr_pred":{
+        	"source":"coberturas.predios_titulados",
+            "fldidpredio":"idpredio"
+        }
+    },
+	{
+    	"subfix":"_tioc",
+        "tolerance":"0",
+        "lyr_parc":{
+        	"source":"coberturas.tioc",
+            "fldidpredio":"idpredio",
+            "fldpredio":"nomparcela",
+            "fldpropietario":"nomparcela"
+        },
+        "lyr_pred":{
+        	"source":"coberturas.predios_tioc",
+            "fldidpredio":"idpredio"
+        }
+    },
+	{
+    	"subfix":"_pop",
+        "tolerance":"0",
+        "lyr_parc":{
+        	"source":"coberturas.predios_pop",
+            "fldpredio":"nom_pre",
+            "fldpropietario":"nom_pro"
+        }
+    },
+	{
+    	"subfix":"_proc",
+        "tolerance":"0",
+        "lyr_parc":{
+        	"source":"coberturas.predios_proceso_geosicob_geo_201607",
+            "fldidpredio":"idpredio",
+            "fldpredio":"nompred",
+            "fldpropietario":"beneficiar"
+        },
+        "lyr_pred":{
+        	"source":"coberturas.predios_referenciales",
+            "fldidpredio":"sicob_id"
+        }
+	}]'::json;
                  
 IF COALESCE( (_opt->>'lyr_parc')::text,'') <> '' THEN --> Si se indica cobertura de referencia.
-   	IF NOT sicob_exist_column(_opt->>'lyr_parc', COALESCE((_opt->>'fldpredio_parc')::text, 'predio')) THEN
+	_fldpredio := COALESCE((_opt->>'fldpredio_parc')::text, 'predio');
+   	IF NOT sicob_exist_column(_opt->>'lyr_parc', _fldpredio ) THEN
        	_fldpredio := '''COLUMNA NO ENCONTRADA''';
    	END IF;
-   	IF NOT sicob_exist_column(_opt->>'lyr_parc', COALESCE((_opt->>'fldpropietario_parc')::text, 'propietario')) THEN
+    _fldpropietario := COALESCE((_opt->>'fldpropietario_parc')::text, 'propietario');
+   	IF NOT sicob_exist_column(_opt->>'lyr_parc', _fldpropietario ) THEN
       	_fldpropietario := '''COLUMNA NO ENCONTRADA''';
    	END IF;
 	lyr_predio :=   ('{
-                        "lyr_parc":"' || (_opt->>'lyr_parc')::text || '",
-                        "fldpredio_parc":"' || _fldpredio || '",
-                        "fldpropietario_parc":"' || _fldpropietario || '",
+                        "lyr_parc":{"source":"' || (_opt->>'lyr_parc')::text || '",
+                        "fldpredio":"' || _fldpredio || '",
+                        "fldpropietario":"' || _fldpropietario || '"},
                         "subfix":"_parc"}')::json;
 
     lyrs_predio := (lyr_predio::jsonb || lyrs_predio::jsonb)::json;
@@ -115,7 +131,7 @@ FOR lyr_predio IN SELECT * FROM json_array_elements(lyrs_predio) LOOP
 	IF a <> '' AND lyr_predio->>'lyr_parc' <> '' THEN --> Si existen poligonos para localizar.
     	_out := sicob_overlap(('{"a":"' || a || 
         			'","condition_a":"' || _condition || 
-                    '","b":"' || (lyr_predio->>'lyr_parc')::text || 
+                    '","b":"' || (lyr_predio->'lyr_parc'->>'source')::text || 
                     '","subfix":"' || (lyr_predio->>'subfix')::text || 
                     '","tolerance":"' || COALESCE((lyr_predio->>'tolerance')::text, _tolerance ) || 
                     '","add_diff":true,"temp" : true' || 
@@ -143,8 +159,8 @@ FOR lyr_predio IN SELECT * FROM json_array_elements(lyrs_predio) LOOP
                 ',_out->>'lyr_over',a, (_opt->>'lyr_in')::text);
             END IF;
             
-        	_fldpredio := (lyr_predio->>'fldpredio_parc')::text;
-        	_fldpropietario := (lyr_predio->>'fldpropietario_parc')::text;
+        	_fldpredio := COALESCE((lyr_predio->'lyr_parc'->>'fldpredio')::text, 'predio');
+        	_fldpropietario := COALESCE((lyr_predio->'lyr_parc'->>'fldpropietario')::text, 'propietario');
             
             sql := format('
                     SELECT 
@@ -186,8 +202,8 @@ FOR lyr_predio IN SELECT * FROM json_array_elements(lyrs_predio) LOOP
                     	THEN 'to_char(fec_res,''DD/MM/YYYY'')' 
                         ELSE 'CAST(NULL  AS text)' 
                     END || ' AS fec_resol_pop, ' ||
-                    'CAST(''' || COALESCE((lyr_predio->>'lyr_pred')::text, (lyr_predio->>'lyr_parc')::text ) || ''' AS text) AS source_predio, ' ||
-                    COALESCE((lyr_predio->>'fldidpredio_parc')::text, 'id_b' ) || ' AS id_predio, ' ||
+                    'CAST(''' || COALESCE((lyr_predio->'lyr_pred'->>'source')::text, (lyr_predio->'lyr_parc'->>'source')::text ) || ''' AS text) AS source_predio, ' ||
+                    COALESCE((lyr_predio->'lyr_parc'->>'fldidpredio')::text, 'id_b' ) || ' AS id_predio, ' ||
                     'the_geom
                     FROM
                         %s
@@ -279,7 +295,13 @@ END IF;
     
 	a := 'temp.' || tbl_name || '_ppred'; --> Nombre de la capa resultante de intersectar los poligonos de entrada con los predios.
 --> Complementando información de ubicación politico-administrativo.
-    sql := 'SELECT t.*,u.nom_dep, u.nom_prov, u.nom_mun 
+    sql := 'SELECT ' || 
+    sicob_no_geo_column(
+        	tbl_name || '_ppred1' ,
+            '{nom_dep,nom_prov,nom_mun}',
+            't.'
+        )
+    || ',u.nom_dep, u.nom_prov, u.nom_mun, t.the_geom 
     	FROM
         	' || tbl_name || '_ppred1' || ' t LEFT OUTER JOIN
 			(SELECT * FROM sicob_ubication(''' || tbl_name || '_ppred1' || ''') ) u
@@ -401,7 +423,7 @@ IF inters_cnt > 0 THEN --> Si se han encontrado poligonos.
                 FROM
                   ' || a || ' a
                 WHERE
-                	source_predio = ''' || COALESCE((lyr_predio->>'lyr_pred')::text, (lyr_predio->>'lyr_parc')::text) || '''
+                	source_predio = ''' || COALESCE((lyr_predio->'lyr_pred'->>'source')::text, (lyr_predio->'lyr_parc'->>'source')::text) || '''
                 GROUP BY
                   predio,
                   propietario,
@@ -432,8 +454,8 @@ IF inters_cnt > 0 THEN --> Si se han encontrado poligonos.
                     END || ' AS sup_predio, ' ||                
                 ' st_multi(b.the_geom) as the_geom
                 FROM
-                	ref_pred a INNER JOIN ' || COALESCE((lyr_predio->>'lyr_pred')::text, (lyr_predio->>'lyr_parc')::text) || ' b ON 
-                (b.' || COALESCE((lyr_predio->>'fldidpredio_pred')::text, 'sicob_id' ) || ' = a.id_predio)
+                	ref_pred a INNER JOIN ' || COALESCE((lyr_predio->'lyr_pred'->>'source')::text, (lyr_predio->'lyr_parc'->>'source')::text) || ' b ON 
+                (b.' || COALESCE((lyr_predio->'lyr_pred'->>'fldidpredio')::text, 'sicob_id' ) || ' = a.id_predio)
             )
             SELECT row_number() over() AS sicob_id,* from pred;';
             RAISE DEBUG 'Running %', sql;
