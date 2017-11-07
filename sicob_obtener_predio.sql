@@ -27,8 +27,8 @@ BEGIN
 --	condition (opcional):  Filtro para los datos de la capa "lyr_in". Si no se especifica, se toman todos los registros.
 --> lyr_pred : capa con predios de referencia.
 --> lyr_parc : capa con las parcelas de referencia.
---> fldpredio : campo que contiene el nombre del predio en la capa de referencia.
---> fldpropietario : campo que contiene el nombre del propietario en la capa de referncia. 
+--> fldpredio_parc : campo que contiene el nombre del predio en la capa de referencia.
+--> fldpropietario_parc : campo que contiene el nombre del propietario en la capa de referncia. 
 --> geojson (opcional true/false): Devuelve el resultado en formato geojson. Por defecto es false.
 --> min_sup (opcional): Superficie minima (en hectareas) permitida para los poligonos de la capa resultado por defecto es igual a 0.002 que fue la minima encontrada en los PDM.
 --> tolerance (opcional): Distancia máxima (en metros) para el autoajuste automático de los bordes de "a" hacia los bordes de "b" (snapping). Si no se especifica, no se realiza autoajuste.
@@ -48,11 +48,17 @@ BEGIN
 --_opt := '{"lyr_in":"coberturas.pdm","condition":"res_adm = ''RS-OLSC-PDM-129-2000''"}';
 --_opt := '{"lyr_in":"uploads.f20170704gcfebdac5d7c097","lyr_parc":"uploads.f20170705ecgdbfafbc4c20f"}'::json;
 --_opt := '{"lyr_in":"processed.f20170718fagebdcf580ac83_nsi"}'::json;
+--_opt := '{"lyr_in":"uploads.f20170921fdaecgbaaab0ca1"}';
+--_opt := '{"lyr_in":"uploads.f20170926adcgefb27cabb75"}';
 
-_tolerance := COALESCE((_opt->>'tolerance')::text, '5.3');
+--_opt := '{"lyr_in":"processed.f20170928daecbfg7768f8ae_nsi","min_sup":"0","tolerance":"0"}';
+
+_tolerance := COALESCE((_opt->>'tolerance')::text, '0'); --> 5.3
+
 tbl_name := (_opt->>'lyr_in')::text;
 	SELECT (sicob_split_table_name(tbl_name)).table_name INTO tbl_name ;
 _condition := COALESCE( (_opt->>'condition')::text , 'TRUE');
+_min_sup := COALESCE((_opt->>'min_sup')::real, 0); --> La superficie 0.002 es la menor existente en la BD. Utilizar este valor en caso de no der agropecuario.
 
 lyrs_predio := '[{
     	"subfix":"_tit",
@@ -134,7 +140,7 @@ FOR lyr_predio IN SELECT * FROM json_array_elements(lyrs_predio) LOOP
                     '","b":"' || (lyr_predio->'lyr_parc'->>'source')::text || 
                     '","subfix":"' || (lyr_predio->>'subfix')::text || 
                     '","tolerance":"' || COALESCE((lyr_predio->>'tolerance')::text, _tolerance ) || 
-                    '","add_diff":true,"temp" : true' || 
+                    '","add_diff":true,"temp" : false' || 
                     '}')::json); 
         IF COALESCE( (_out->>'features_inters_cnt')::int,0) > 0 THEN  --> Si se han localizado predios.
         
@@ -191,7 +197,7 @@ FOR lyr_predio IN SELECT * FROM json_array_elements(lyrs_predio) LOOP
                         ELSE 'CAST(NULL AS float)' 
                     END || ' AS sup_predio, ' ||
                     CASE (lyr_predio->>'subfix')::text 
-                    	WHEN '_parc'	THEN _fldpredio || '::text'
+                    	WHEN '_parc'	THEN 'CAST(' ||_fldpredio || ' AS text)'
                     	ELSE 'CAST(NULL AS text)'
                     END || ' AS parcela, ' ||
                     CASE (lyr_predio->>'subfix')::text WHEN '_pop' 
@@ -220,7 +226,7 @@ FOR lyr_predio IN SELECT * FROM json_array_elements(lyrs_predio) LOOP
           
             IF COALESCE( (_out->>'features_diff_cnt')::int,0) > 0 THEN --> si existen poligonos NO encontrados.
             	a := (_out->>'lyr_over')::text;
-                _condition := 'id_b IS NULL';
+                _condition := 'a.id_b IS NULL';
             ELSE
             	a := '';
             END IF; 
@@ -228,8 +234,24 @@ FOR lyr_predio IN SELECT * FROM json_array_elements(lyrs_predio) LOOP
     END IF;
 END LOOP;
 
+
 --> ADICIONANDO LOS POLIGONOS SIN PREDIO
 IF COALESCE( (_out->>'features_diff_cnt')::int,0) > 0 THEN --> si existen poligonos NO encontrados.
+
+        	IF a <> (_opt->>'lyr_in')::text THEN 
+            --> Actualizar referencia "id_a" de los poligonos sin predios hacia la capa de entrada "lyr_in".
+                sql := '
+                    UPDATE
+                        ' || a || ' a
+                    SET
+                        id_a = b.sicob_id, source_a = ''' || (_opt->>'lyr_in')::text || ''', source_b = CAST(NULL AS TEXT)
+                    FROM ' || (_opt->>'lyr_in')::text || ' b 
+                    WHERE a.id_b IS NULL AND st_intersects(a.the_geom,b.the_geom)                
+                ';
+                RAISE DEBUG 'Running %', sql;
+                EXECUTE sql;
+            END IF;
+
   sql := format('
       SELECT 
       id_a,
@@ -284,7 +306,7 @@ END IF;
         ) || 
         ',r.the_geom
     	 FROM ' || tbl_name || '_ppred' || ' r 
-  		 INNER JOIN ' || (_opt->>'lyr_in')::text || ' a ON (r.id_a = a.sicob_id) ' ||
+  		 INNER JOIN ' || (_opt->>'lyr_in')::text || ' a ON (r.id_a = a.' || COALESCE(sicob_feature_id((_opt->>'lyr_in')::text ), 'sicob_id') || ') ' ||
 --        'WHERE r.predio IS NOT NULL ' || --> Filtrando en la capa resultado solamente los poligonos que tienen predio.
         'ORDER BY a.sicob_id';
 	sql := '
@@ -292,8 +314,9 @@ END IF;
         FROM 
         (' || sql || ') t';
     EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_name || '_ppred1' || ' ON COMMIT DROP AS ' || sql;
-    
+   
 	a := 'temp.' || tbl_name || '_ppred'; --> Nombre de la capa resultante de intersectar los poligonos de entrada con los predios.
+
 --> Complementando información de ubicación politico-administrativo.
     sql := 'SELECT ' || 
     sicob_no_geo_column(
@@ -307,6 +330,7 @@ END IF;
 			(SELECT * FROM sicob_ubication(''' || tbl_name || '_ppred1' || ''') ) u
 			ON (u.sicob_id = t.sicob_id)
 		';  
+         
 	EXECUTE 'DROP TABLE IF EXISTS ' || a; 
     EXECUTE 'CREATE TABLE ' || a || ' AS ' || sql;
     
@@ -316,12 +340,12 @@ END IF;
 	USING GIST (the_geom) ';
 	RAISE DEBUG 'Running %', sql;
 	EXECUTE sql;
-   
+
 IF inters_cnt > 0 THEN --> Si se han encontrado poligonos.               
 --> AGREGANDO INFORMACION DE POP A LOS POLIGONOS TITULADOS Y POLIGONOS UBICADOS EN PARCELAS DE REFERENCIA
-	_condition := 'source_parcela = ''coberturas.parcelas_tituladas''';    
+	_condition := 'a.source_parcela = ''coberturas.parcelas_tituladas''';    
 	IF COALESCE( (_opt->>'lyr_parc')::text,'') <> '' THEN --> Si se indica cobertura de referencia.
-    	_condition := _condition || ' OR source_parcela = ''' || (_opt->>'lyr_parc')::text || '''';
+    	_condition := _condition || ' OR a.source_parcela = ''' || (_opt->>'lyr_parc')::text || '''';
     END IF;
     tmp := sicob_overlap(('{"a":"' || a || '","condition_a":"' || _condition || '","b":"coberturas.predios_pop","subfix":"_pop","tolerance":"0","add_diff":false, "temp": true}')::json);
     IF COALESCE( (tmp->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado POP.
@@ -338,7 +362,7 @@ IF inters_cnt > 0 THEN --> Si se han encontrado poligonos.
     
 --> AGREGANDO INFORMACION DE TITULACION A LOS POLIGONOS UBICADOS EN PARCELAS DE REFERENCIA
 	IF COALESCE( (_opt->>'lyr_parc')::text,'') <> '' THEN --> Si se indica cobertura de referencia.
-    	_condition := 'source_parcela = ''' || (_opt->>'lyr_parc')::text || '''';
+    	_condition := 'a.source_parcela = ''' || (_opt->>'lyr_parc')::text || '''';
         tmp := sicob_overlap(('{"a":"' || a || '","condition_a":"' || _condition || '","b":"coberturas.parcelas_tituladas","subfix":"_tit","tolerance":"0","add_diff":false, "temp": true}')::json);
         IF COALESCE( (tmp->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado parcelas tituladas.
             sql := '
@@ -369,7 +393,7 @@ END IF;
     PERFORM sicob_update_geoinfo_column(a);
 
 	--Eliminando poligonos con superfice menor a la mínima.
-    _min_sup := COALESCE((_opt->>'min_sup')::real, 0.002); --> La superficie 0.002 es la menor existente en la BD.
+
     IF _min_sup > 0 THEN
     	sql := 'DELETE FROM ' || a || 
         ' WHERE sicob_sup < ' || _min_sup::text;
@@ -399,6 +423,8 @@ END IF;
             EXECUTE sql;
         END IF;
     END IF;    
+   
+    
     
     -->OBTENIENDO LA CANTIDAD DE POLIGONOS ENCONTRADOS.
     EXECUTE 'SELECT count(*) as cnt FROM ' || a || ' WHERE predio IS NOT NULL' INTO inters_cnt;
@@ -457,20 +483,27 @@ IF inters_cnt > 0 THEN --> Si se han encontrado poligonos.
                 	ref_pred a INNER JOIN ' || COALESCE((lyr_predio->'lyr_pred'->>'source')::text, (lyr_predio->'lyr_parc'->>'source')::text) || ' b ON 
                 (b.' || COALESCE((lyr_predio->'lyr_pred'->>'fldidpredio')::text, 'sicob_id' ) || ' = a.id_predio)
             )
-            SELECT row_number() over() AS sicob_id,* from pred;';
+            SELECT * from pred;';
             RAISE DEBUG 'Running %', sql;
         	IF createdResult THEN
 				EXECUTE 'INSERT INTO temp.' || tbl_name || '_pred ' || sql;
             ELSE
             	EXECUTE 'DROP TABLE IF EXISTS temp.' || tbl_name || '_pred'; 
                 EXECUTE 'CREATE TABLE temp.' || tbl_name || '_pred' || ' AS ' || sql;
+                EXECUTE 'ALTER TABLE temp.' || tbl_name || '_pred ADD sicob_id SERIAL NOT NULL UNIQUE';
                 createdResult := TRUE;
         	END IF;
     END LOOP;
+    
+    IF createdResult THEN
+    	--AGREGANDO LA GEOINFORMACION
+		PERFORM sicob_add_geoinfo_column('temp.' || tbl_name || '_pred');
+    	PERFORM sicob_update_geoinfo_column('temp.' || tbl_name || '_pred');
+    END IF;    
 
 	--> AGREGANDO INFORMACION DE TITULACION A LOS PREDIOS CARGADOS POR EL USUARIO
 	IF COALESCE( (_opt->>'lyr_parc')::text,'') <> '' THEN --> Si se indica cobertura de referencia.
-    	_condition := 'source_predio = ''' || (_opt->>'lyr_parc')::text || '''';
+    	_condition := 'a.source_predio = ''' || (_opt->>'lyr_parc')::text || '''';
         tmp := sicob_overlap(('{"a":"temp.' || tbl_name || '_pred","condition_a":"' || _condition || '","b":"coberturas.parcelas_tituladas","subfix":"_tit","tolerance":"0","add_diff":false, "temp": true}')::json);
         IF COALESCE( (tmp->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado parcelas tituladas.
             sql := '
@@ -489,7 +522,6 @@ IF inters_cnt > 0 THEN --> Si se han encontrado poligonos.
             EXECUTE sql;            
         END IF;
     END IF;
-
 
     -->GENERANDO EL JSON DE INFORMACION DE PREDIOS           
     sql := '
