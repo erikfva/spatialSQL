@@ -50,7 +50,7 @@ IF COALESCE( (_opt->>'doanalisys')::text , '') <> '' THEN
 	) v INTO _doanalisys;
 END IF;
 
-_workers := COALESCE( (_opt->>'workers')::int, 10);
+_workers := COALESCE( (_opt->>'workers')::int, 5);
 
 IF array_length(_doanalisys, 1)>2 AND _workers > 1 THEN
 	/*
@@ -128,8 +128,7 @@ IF 'ATE' = ANY(_doanalisys) THEN
             'condition_b', 'est=''VIGENTE''',
             'subfix', '_ate',
             'schema', 'temp',
-            'add_sup_total', true,
-            'filter_overlap', false
+            'add_sup_total', true
         )
         /*
     ('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.ate","condition_b":"est=\\''VIGENTE\\''","subfix":"_ate","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json
@@ -154,7 +153,7 @@ END IF;
 --Asociación Sociales del Lugar (ASL)
 ----------------------------------------------
 IF 'ASL' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.asl","subfix":"_asl","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.asl","subfix":"_asl","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado predios.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.asl","nombre":"Asociación Sociales del Lugar (ASL)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
         
@@ -174,7 +173,7 @@ END IF;
 --Plan Gral. de Manejo Forestal  (PGMF)
 ----------------------------------------------
 IF 'PGMF' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.pgmf","subfix":"_pgmf","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.pgmf","subfix":"_pgmf","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado predios.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.pgmf","nombre":"Plan Gral. de Manejo Forestal  (PGMF)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
             EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
@@ -192,7 +191,7 @@ END IF;
 --Plan Operativo Anual Forestal (POAF)
 ----------------------------------------------
 IF 'POAF' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.poaf","subfix":"_poaf","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.poaf","subfix":"_poaf","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado predios.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.poaf","nombre":"Plan Operativo Anual Forestal (POAF)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
             EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
@@ -210,7 +209,7 @@ END IF;
 --Plan de Ordenamiento  Predial (POP)
 ----------------------------------------------
 IF 'POP' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.pop_uso_vigente","subfix":"_pop_uso","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.pop_uso_vigente","subfix":"_pop_uso","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado predios.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.pop_uso_vigente","nombre":"Plan de Ordenamiento  Predial (POP)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
          EXECUTE '
@@ -225,7 +224,7 @@ END IF;
 --Plan de Desmonte (PDM)
 ----------------------------------------------
 IF 'PDM' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.pdm","subfix":"_pdm","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.pdm","subfix":"_pdm","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado predios.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.pdm","nombre":"Plan de Desmonte (PDM)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
         EXECUTE '
@@ -265,7 +264,7 @@ END IF;
 --Reservas Privada de Patrimonio  Natural (RPPN)
 ----------------------------------------------
 IF 'RPPN' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.rppn","subfix":"_rppn","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.rppn","subfix":"_rppn","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado predios.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.rppn","nombre":"Reservas Privada de Patrimonio Natural (RPPN)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
             EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
@@ -283,7 +282,7 @@ END IF;
 --Tierras de Produccion Forestal Permanente (TPFP)
 ----------------------------------------------
 IF 'TPFP' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.tpfp","subfix":"_tpfp","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.tpfp","subfix":"_tpfp","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado predios.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.tpfp","nombre":"Tierras de Produccion Forestal Permanente (TPFP)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
         
@@ -371,7 +370,7 @@ END IF;
 --Desmontes Inscritos Ley 337 (D337)
 ----------------------------------------------
 IF 'D337' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.d337","subfix":"_d337","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.d337","subfix":"_d337","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado desmontes.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.d337","nombre":"Desmontes inscritos Programa de Produccion de Alimentos","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
             EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
@@ -390,7 +389,7 @@ END IF;
 --Desmontes Ilegales con Proceso Administrativo Sancionatorio (DPAS)
 ----------------------------------------------
 IF 'DPAS' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.dpas","subfix":"_dpas","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.dpas","subfix":"_dpas","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado desmontes.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.dpas","nombre":"Desmontes ilegales con Proceso Administrativo Sancionatorio (DPAS)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
             EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
