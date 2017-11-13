@@ -4,6 +4,7 @@ CREATE OR REPLACE FUNCTION public.sicob_analisis_sobreposicion(_opt json)
 AS $function$
 DECLARE 
   _lyr_in TEXT;
+  _workers integer;
   _aux json := '{}'; 
   _out json := '{}'; 
   b TEXT;
@@ -11,6 +12,10 @@ DECLARE
   sql text;
   detalle json;
  _doanalisys text[] DEFAULT ARRAY['ATE', 'ASL', 'PGMF', 'POAF', 'POP', 'PDM', 'RF', 'RPPN', 'TPFP', 'PLUS', 'D337', 'DPAS', 'APN', 'APM'];
+	listSQL TEXT[];
+    analisys text;
+    _paralell_opt json := '{}';
+	_partial_result json := '{}';
 
 BEGIN
 ---------------------------
@@ -20,6 +25,7 @@ BEGIN
 --> condition (opcional): Filtro para los datos de "lyr_in". Si no se especifica, se toman todos los registros.
 --> doanalisys : Array del listado de analisis a aplicar, ej. "doanalisys":["TPFP","ASL"].
 --> 	Si no se especifica se realizan todos los analisis.
+--> workers : Cantidad de procesos para trabajar en paralelo, por defecto es 1 con lo se trabaja de forma secuencial (mas lento), se recomienda de 3 a 7 para no sobrecargar.
 ---------------------------
 --VALORES DEVUELTOS
 ---------------------------
@@ -34,7 +40,8 @@ BEGIN
 --> porcentaje_sup: Valor de 0 a 100 que indica el porcentaje de superficie sobrepuesta.
 --> sicob_sup_total: Superficie total en ha. de la capa de entrada, calculada por el sistema.
 
---_opt := '{"lyr_in":"uploads.f20170704gcfebdac5d7c097","doanalisys":["TPFP","ASL","ATE"]}'::json;
+--_opt := '{"lyr_in":"uploads.f20170704gcfebdac5d7c097","doanalisys":["TPFP","ASL","ATE","PLUS"]}'::json;
+--_opt := '{"lyr_in":"processed.f20171107adgecfb25a069f4_nsi"}'::json;
 
 IF COALESCE( (_opt->>'doanalisys')::text , '') <> '' THEN
 	SELECT array_agg(regexp_replace(u::text,'"','','g')) FROM
@@ -42,6 +49,52 @@ IF COALESCE( (_opt->>'doanalisys')::text , '') <> '' THEN
 		SELECT json_array_elements(((_opt::json)->>'doanalisys')::json) as u
 	) v INTO _doanalisys;
 END IF;
+
+_workers := COALESCE( (_opt->>'workers')::int, 5);
+
+IF array_length(_doanalisys, 1)>2 AND _workers > 1 THEN
+	/*
+    i := 0;
+	LOOP
+    	IF i = array_length(_doanalisys, 1) THEN
+        	EXIT;
+        END IF;
+        i := i + 1;
+        SELECT array_append(partial_analisys, _doanalisys[i]::text) INTO partial_analisys;        
+        IF i = array_length(_doanalisys, 1) OR array_length(partial_analisys, 1) = 2 THEN
+            _paralell_opt := _opt::jsonb || 
+                                jsonb_build_object(
+                                    'doanalisys', partial_analisys::text[]
+                                );
+            sql := 'SELECT sicob_analisis_sobreposicion('|| QUOTE_LITERAL(_paralell_opt) || '::json)';
+            SELECT array_append(listSQL, sql::text) INTO listSQL;  
+            SELECT ARRAY[]::text[] INTO  partial_analisys;      
+        END IF;
+        
+    END LOOP;
+    */
+    
+    --GENERANDO UNA CONSULTA PARA CADA ANALISIS. 
+	FOREACH analisys IN ARRAY _doanalisys LOOP
+        _paralell_opt := _opt::jsonb || 
+                            jsonb_build_object(
+                                'doanalisys',ARRAY[analisys::text]
+                            );
+        sql := 'SELECT sicob_analisis_sobreposicion('|| QUOTE_LITERAL(_paralell_opt) || '::json)';
+        SELECT array_append(listSQL, sql::text) INTO listSQL;
+	END LOOP;   
+    
+    --EJECUTANDO LOS ANALISIS DE FORMA PARALELA.     	
+    select sicob_paralellsql(listSQL,('{"max_connections":' || _workers || '}')::json) into _aux;
+    
+    --CONSOLIDANDO LOS RESULTADOS PARCIALES EN UNO SOLO
+    FOR _partial_result IN SELECT * FROM json_array_elements(_aux) LOOP
+    	_out := _out::jsonb || (_partial_result->'result')::jsonb;
+    END LOOP;
+    
+    RETURN _out;
+END IF;
+
 
 _lyr_in := _opt->>'lyr_in';
 sql := 'SELECT array_to_json(array_agg(q)) as detalle
@@ -67,7 +120,20 @@ EXECUTE 'SELECT sum(sicob_sup) FROM ' || _lyr_in ||
 --Autorizaciones Transitorias Especiales (ATE)
 ----------------------------------------------
 IF 'ATE' = ANY(_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.ate","condition_b":"est=''VIGENTE''","subfix":"_ate","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(
+    	json_build_object(
+        	'a', _lyr_in,
+            'condition_a', COALESCE( (_opt->>'condition')::text , 'TRUE'),
+            'b', 'coberturas.ate',
+            'condition_b', 'est=''VIGENTE''',
+            'subfix', '_ate',
+            'schema', 'temp',
+            'add_sup_total', true
+        )
+        /*
+    ('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.ate","condition_b":"est=\\''VIGENTE\\''","subfix":"_ate","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json
+    	*/
+    );
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado predios.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.ate","nombre":"Autorizaciones Transitorias Especiales (ATE)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
         
@@ -87,7 +153,7 @@ END IF;
 --Asociación Sociales del Lugar (ASL)
 ----------------------------------------------
 IF 'ASL' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.asl","subfix":"_asl","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.asl","subfix":"_asl","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado predios.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.asl","nombre":"Asociación Sociales del Lugar (ASL)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
         
@@ -107,7 +173,7 @@ END IF;
 --Plan Gral. de Manejo Forestal  (PGMF)
 ----------------------------------------------
 IF 'PGMF' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.pgmf","subfix":"_pgmf","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.pgmf","subfix":"_pgmf","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado predios.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.pgmf","nombre":"Plan Gral. de Manejo Forestal  (PGMF)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
             EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
@@ -125,7 +191,7 @@ END IF;
 --Plan Operativo Anual Forestal (POAF)
 ----------------------------------------------
 IF 'POAF' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.poaf","subfix":"_poaf","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.poaf","subfix":"_poaf","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado predios.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.poaf","nombre":"Plan Operativo Anual Forestal (POAF)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
             EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
@@ -143,7 +209,7 @@ END IF;
 --Plan de Ordenamiento  Predial (POP)
 ----------------------------------------------
 IF 'POP' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.pop_uso_vigente","subfix":"_pop_uso","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.pop_uso_vigente","subfix":"_pop_uso","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado predios.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.pop_uso_vigente","nombre":"Plan de Ordenamiento  Predial (POP)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
          EXECUTE '
@@ -158,7 +224,7 @@ END IF;
 --Plan de Desmonte (PDM)
 ----------------------------------------------
 IF 'PDM' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.pdm","subfix":"_pdm","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.pdm","subfix":"_pdm","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado predios.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.pdm","nombre":"Plan de Desmonte (PDM)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
         EXECUTE '
@@ -198,7 +264,7 @@ END IF;
 --Reservas Privada de Patrimonio  Natural (RPPN)
 ----------------------------------------------
 IF 'RPPN' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.rppn","subfix":"_rppn","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.rppn","subfix":"_rppn","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado predios.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.rppn","nombre":"Reservas Privada de Patrimonio Natural (RPPN)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
             EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
@@ -216,7 +282,7 @@ END IF;
 --Tierras de Produccion Forestal Permanente (TPFP)
 ----------------------------------------------
 IF 'TPFP' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.tpfp","subfix":"_tpfp","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.tpfp","subfix":"_tpfp","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado predios.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.tpfp","nombre":"Tierras de Produccion Forestal Permanente (TPFP)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
         
@@ -304,7 +370,7 @@ END IF;
 --Desmontes Inscritos Ley 337 (D337)
 ----------------------------------------------
 IF 'D337' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.d337","subfix":"_d337","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.d337","subfix":"_d337","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado desmontes.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.d337","nombre":"Desmontes inscritos Programa de Produccion de Alimentos","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
             EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
@@ -323,7 +389,7 @@ END IF;
 --Desmontes Ilegales con Proceso Administrativo Sancionatorio (DPAS)
 ----------------------------------------------
 IF 'DPAS' = ANY (_doanalisys) THEN
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.dpas","subfix":"_dpas","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.dpas","subfix":"_dpas","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado desmontes.
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.dpas","nombre":"Desmontes ilegales con Proceso Administrativo Sancionatorio (DPAS)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
             EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
