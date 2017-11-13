@@ -6,6 +6,7 @@ AS $function$
 DECLARE 
     _sql text;
     _newedge geometry;
+    temp_edge geometry;
     row_cnt integer;
     _tolerance double precision;
     _target regclass;
@@ -533,7 +534,16 @@ _snapclipa AS (
  (select st_union(the_geom) as the_geom FROM _shadowa) lb;
  	
 	if st_geometrytype(_newedge) not in ('ST_LineString') then
-    	_newedge := ST_BuildArea(_newedge);   
+   		temp_edge := ST_BuildArea(_newedge); --ST_BuildArea(_newedge);
+        IF (temp_edge IS NULL OR ST_IsEmpty(temp_edge) ) THEN --> POSIBLE CASO DE SEGMENTOS ABIERTOS
+        	-->Intentado buscar segmentos abiertos
+            temp_edge = sicob_doors(_newedge, 0.00009);
+            IF(temp_edge IS NOT NULL AND ST_IsEmpty(temp_edge)=FALSE) THEN
+            	temp_edge := ST_BuildArea(ST_Union(temp_edge,_newedge));
+            END IF;
+        	
+        END IF; 
+        _newedge := temp_edge; 
         IF _returnpolygon = false THEN
         	_newedge := st_exteriorring( _newedge);
         END IF; 
@@ -560,7 +570,7 @@ _snapclipa AS (
 
 EXCEPTION
 WHEN others THEN
-            RAISE EXCEPTION 'geoSICOB (sicob_snap_edge): _edge: % | _target: % >> %, (%) ', st_astext(_edge), _target::text, SQLERRM, SQLSTATE;	
+            RAISE EXCEPTION 'geoSICOB (sicob_snap_edge): _edge: % | _target: % >> %, (%), newedge: %', st_astext(_edge), _target::text,  st_astext(_newedge), SQLERRM, SQLSTATE;	
 END;
 $function$
  
