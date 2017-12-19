@@ -20,6 +20,7 @@ DECLARE
  lyr_predio json;
  tmp json;
  inters_cnt integer; diff_cnt integer;
+ _subfix text;
 BEGIN
 
 --VARIABLES DE ENTRADA:
@@ -32,13 +33,14 @@ BEGIN
 --> geojson (opcional true/false): Devuelve el resultado en formato geojson. Por defecto es false.
 --> min_sup (opcional): Superficie minima (en hectareas) permitida para los poligonos de la capa resultado por defecto es igual a 0.002 que fue la minima encontrada en los PDM.
 --> tolerance (opcional): Distancia máxima (en metros) para el autoajuste automático de los bordes de "a" hacia los bordes de "b" (snapping). Si no se especifica, no se realiza autoajuste.
+--> subfix (opcional): Texto que se adicionara al final del nombre de las capas resultantes.
 
 --VARIABLES DE SALIDA:
---> lyr_over: Nombre de la capa resultante, este es igual al nombre de la capa de entrada más el subfijo “_ppred”. Esta capa siempre será creada en el esquema “temp” de la BD. 
+--> lyr_over: Nombre de la capa resultante, este es igual al nombre de la capa de entrada más mas el texto de subfix (si se proporciona) mas el texto “_ppred” . Esta capa siempre será creada en el esquema “temp” de la BD. 
 --> features_inters_cnt: Cantidad de polígonos que SI se han encontrado sus predios.
 --> features_diff_cnt: Cantidad de polígonos de los cuales NO se ha encontrado predio.
 --> lyr_geojson : Si se ha indicado el valor geojson de entrada como "true", devuelve la capa resultado en formato geojson.
---> lyr_pred: Nombre de la capa que contiene los predios encontrados.
+--> lyr_pred: Nombre de la capa que contiene los predios encontrados. Este valor es igual al nombre de la capa de entrada mas el texto de subfix (si se proporciona) más el texto “_pred” . Esta capa siempre será creada en el esquema “temp” de la BD.
 --> predios : Array json con el detalle de los predios encontrados.
 --> total_predios: Cantidad de predios encontrados.
  
@@ -50,8 +52,8 @@ BEGIN
 --_opt := '{"lyr_in":"processed.f20170718fagebdcf580ac83_nsi"}'::json;
 --_opt := '{"lyr_in":"uploads.f20170921fdaecgbaaab0ca1"}';
 --_opt := '{"lyr_in":"uploads.f20170926adcgefb27cabb75"}';
-
 --_opt := '{"lyr_in":"processed.f20170928daecbfg7768f8ae_nsi","min_sup":"0","tolerance":"0"}';
+--_opt := '{"lyr_in":"processed.f20171005fgcbdae84fb9ea1_nsi"}';
 
 _tolerance := COALESCE((_opt->>'tolerance')::text, '0'); --> 5.3
 
@@ -59,6 +61,7 @@ tbl_name := (_opt->>'lyr_in')::text;
 	SELECT (sicob_split_table_name(tbl_name)).table_name INTO tbl_name ;
 _condition := COALESCE( (_opt->>'condition')::text , 'TRUE');
 _min_sup := COALESCE((_opt->>'min_sup')::real, 0); --> La superficie 0.002 es la menor existente en la BD. Utilizar este valor en caso de no der agropecuario.
+_subfix := COALESCE( (_opt->>'subfix')::text , '');
 
 lyrs_predio := '[{
     	"subfix":"_tit",
@@ -140,7 +143,8 @@ FOR lyr_predio IN SELECT * FROM json_array_elements(lyrs_predio) LOOP
                     '","b":"' || (lyr_predio->'lyr_parc'->>'source')::text || 
                     '","subfix":"' || (lyr_predio->>'subfix')::text || 
                     '","tolerance":"' || COALESCE((lyr_predio->>'tolerance')::text, _tolerance ) || 
-                    '","add_diff":true,"temp" : false' || 
+                    '","add_diff":true,"temp" : true' || 
+                    ',"add_geoinfo":true' ||
                     '}')::json); 
         IF COALESCE( (_out->>'features_inters_cnt')::int,0) > 0 THEN  --> Si se han localizado predios.
         
@@ -218,9 +222,9 @@ FOR lyr_predio IN SELECT * FROM json_array_elements(lyrs_predio) LOOP
                     
             RAISE DEBUG 'Running %', sql;
         	IF createdResult THEN
-				EXECUTE 'INSERT INTO ' || tbl_name || '_ppred ' || sql;
+				EXECUTE 'INSERT INTO ' || tbl_name || _subfix || '_ppred ' || sql;
             ELSE
-                EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_name || '_ppred' || ' ON COMMIT DROP AS ' || sql;
+                EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_name || _subfix || '_ppred' || ' ON COMMIT DROP AS ' || sql;
                 createdResult := TRUE;
         	END IF;
           
@@ -242,7 +246,7 @@ IF COALESCE( (_out->>'features_diff_cnt')::int,0) > 0 THEN --> si existen poligo
             --> Actualizar referencia "id_a" de los poligonos sin predios hacia la capa de entrada "lyr_in".
                 sql := '
                     UPDATE
-                        ' || a || ' a
+                        ' || (_out->>'lyr_over')::text || ' a
                     SET
                         id_a = b.sicob_id, source_a = ''' || (_opt->>'lyr_in')::text || ''', source_b = CAST(NULL AS TEXT)
                     FROM ' || (_opt->>'lyr_in')::text || ' b 
@@ -276,9 +280,9 @@ IF COALESCE( (_out->>'features_diff_cnt')::int,0) > 0 THEN --> si existen poligo
       ',(_out->>'lyr_over')::text);
       RAISE DEBUG 'Running %', sql;
       IF createdResult THEN
-          EXECUTE 'INSERT INTO ' || tbl_name || '_ppred ' || sql;
+          EXECUTE 'INSERT INTO ' || tbl_name || _subfix || '_ppred ' || sql;
       ELSE
-          EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_name || '_ppred' || ' ON COMMIT DROP AS ' || sql;
+          EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_name || _subfix || '_ppred' || ' ON COMMIT DROP AS ' || sql;
           createdResult := TRUE;
       END IF;
 END IF;
@@ -305,7 +309,7 @@ END IF;
             'a.'
         ) || 
         ',r.the_geom
-    	 FROM ' || tbl_name || '_ppred' || ' r 
+    	 FROM ' || tbl_name || _subfix || '_ppred' || ' r 
   		 INNER JOIN ' || (_opt->>'lyr_in')::text || ' a ON (r.id_a = a.' || COALESCE(sicob_feature_id((_opt->>'lyr_in')::text ), 'sicob_id') || ') ' ||
 --        'WHERE r.predio IS NOT NULL ' || --> Filtrando en la capa resultado solamente los poligonos que tienen predio.
         'ORDER BY a.sicob_id';
@@ -313,21 +317,21 @@ END IF;
     	SELECT CAST(row_number() OVER () AS integer) AS sicob_id, t.* 
         FROM 
         (' || sql || ') t';
-    EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_name || '_ppred1' || ' ON COMMIT DROP AS ' || sql;
+    EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_name || _subfix || '_ppred1' || ' ON COMMIT DROP AS ' || sql;
    
-	a := 'temp.' || tbl_name || '_ppred'; --> Nombre de la capa resultante de intersectar los poligonos de entrada con los predios.
+	a := 'temp.' || tbl_name || _subfix || '_ppred'; --> Nombre de la capa resultante de intersectar los poligonos de entrada con los predios.
 
 --> Complementando información de ubicación politico-administrativo.
     sql := 'SELECT ' || 
     sicob_no_geo_column(
-        	tbl_name || '_ppred1' ,
+        	tbl_name || _subfix || '_ppred1' ,
             '{nom_dep,nom_prov,nom_mun}',
             't.'
         )
     || ',u.nom_dep, u.nom_prov, u.nom_mun, t.the_geom 
     	FROM
-        	' || tbl_name || '_ppred1' || ' t LEFT OUTER JOIN
-			(SELECT * FROM sicob_ubication(''' || tbl_name || '_ppred1' || ''') ) u
+        	' || tbl_name || _subfix || '_ppred1' || ' t LEFT OUTER JOIN
+			(SELECT * FROM sicob_ubication(''' || tbl_name || _subfix || '_ppred1' || ''') ) u
 			ON (u.sicob_id = t.sicob_id)
 		';  
          
@@ -335,7 +339,7 @@ END IF;
     EXECUTE 'CREATE TABLE ' || a || ' AS ' || sql;
     
 --> CREANDO INDICE GEOGRAFICO
-    sql := 'CREATE INDEX ' || tbl_name || '_ppred_geomidx
+    sql := 'CREATE INDEX ' || tbl_name || _subfix || '_ppred_geomidx
 	ON ' || a || '  
 	USING GIST (the_geom) ';
 	RAISE DEBUG 'Running %', sql;
@@ -486,28 +490,28 @@ IF inters_cnt > 0 THEN --> Si se han encontrado poligonos.
             SELECT * from pred;';
             RAISE DEBUG 'Running %', sql;
         	IF createdResult THEN
-				EXECUTE 'INSERT INTO temp.' || tbl_name || '_pred ' || sql;
+				EXECUTE 'INSERT INTO temp.' || tbl_name || _subfix || '_pred ' || sql;
             ELSE
-            	EXECUTE 'DROP TABLE IF EXISTS temp.' || tbl_name || '_pred'; 
-                EXECUTE 'CREATE TABLE temp.' || tbl_name || '_pred' || ' AS ' || sql;
-                EXECUTE 'ALTER TABLE temp.' || tbl_name || '_pred ADD sicob_id SERIAL NOT NULL UNIQUE';
+            	EXECUTE 'DROP TABLE IF EXISTS temp.' || tbl_name || _subfix || '_pred'; 
+                EXECUTE 'CREATE TABLE temp.' || tbl_name || _subfix || '_pred' || ' AS ' || sql;
+                EXECUTE 'ALTER TABLE temp.' || tbl_name || _subfix || '_pred ADD sicob_id SERIAL NOT NULL UNIQUE';
                 createdResult := TRUE;
         	END IF;
     END LOOP;
     
     IF createdResult THEN
     	--AGREGANDO LA GEOINFORMACION
-		PERFORM sicob_add_geoinfo_column('temp.' || tbl_name || '_pred');
-    	PERFORM sicob_update_geoinfo_column('temp.' || tbl_name || '_pred');
+		PERFORM sicob_add_geoinfo_column('temp.' || tbl_name || _subfix || '_pred');
+    	PERFORM sicob_update_geoinfo_column('temp.' || tbl_name || _subfix || '_pred');
     END IF;    
 
 	--> AGREGANDO INFORMACION DE TITULACION A LOS PREDIOS CARGADOS POR EL USUARIO
 	IF COALESCE( (_opt->>'lyr_parc')::text,'') <> '' THEN --> Si se indica cobertura de referencia.
     	_condition := 'a.source_predio = ''' || (_opt->>'lyr_parc')::text || '''';
-        tmp := sicob_overlap(('{"a":"temp.' || tbl_name || '_pred","condition_a":"' || _condition || '","b":"coberturas.parcelas_tituladas","subfix":"_tit","tolerance":"0","add_diff":false, "temp": true}')::json);
+        tmp := sicob_overlap(('{"a":"temp.' || tbl_name || _subfix || '_pred","condition_a":"' || _condition || '","b":"coberturas.parcelas_tituladas","subfix":"_tit","tolerance":"0","add_diff":false, "temp": true}')::json);
         IF COALESCE( (tmp->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado parcelas tituladas.
             sql := '
-                UPDATE temp.' || tbl_name || '_pred a
+                UPDATE temp.' || tbl_name || _subfix || '_pred a
                 SET titulo = b.titulo, fecha_titulo = b.fecha_titulo, tipo_propiedad = b.tipo_propiedad
                 FROM (
                   SELECT id_a, min(idpredio) as idpredio, string_agg(predio , '', '') as predio, string_agg(propietario , '', '') as propietario, string_agg(titulo , '', '') as titulo, string_agg(to_char(fecha_titulo,''DD/MM/YYYY'') , '', '') as fecha_titulo, min(tipo_propiedad) as tipo_propiedad, sum(sup_predio) as sup_predio
@@ -532,19 +536,19 @@ IF inters_cnt > 0 THEN --> Si se han encontrado poligonos.
           (
               SELECT ' || 
               sicob_no_geo_column(
-              	'temp.' || tbl_name || '_pred',
+              	'temp.' || tbl_name || _subfix || '_pred',
                 '{}',
                 'a.'
               ) || '
               FROM
-                temp.' || tbl_name || '_pred a
+                temp.' || tbl_name || _subfix || '_pred a
               ORDER BY a.source_predio, a.predio
           ) t
       )u
     ';   
     RAISE DEBUG 'Running %', sql;
     EXECUTE sql INTO tmp; 
-    _out := _out::jsonb || ('{"lyr_pred":"temp.' || tbl_name || '_pred"}')::jsonb || tmp::jsonb;
+    _out := _out::jsonb || ('{"lyr_pred":"temp.' || tbl_name || _subfix || '_pred"}')::jsonb || tmp::jsonb;
 END IF;
 
     
@@ -563,12 +567,12 @@ END IF;
                   (
                       SELECT ' || 
                       sicob_no_geo_column(
-                        'temp.' || tbl_name || '_ppred',
+                        'temp.' || tbl_name || _subfix || '_ppred',
                         '{}',
                         'a.'
                       ) || '
                       FROM
-                        temp.' || tbl_name || '_ppred a
+                        temp.' || tbl_name || _subfix || '_ppred a
                       ORDER BY a.source_predio, a.predio
                   ) t
               )u

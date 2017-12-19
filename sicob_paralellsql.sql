@@ -27,7 +27,7 @@ BEGIN
 -- _listsql := ARRAY['SELECT sicob_analisis_sobreposicion(''{"lyr_in":"uploads.f20170704gcfebdac5d7c097","doanalisys":["TPFP"]}''::json)', 'SELECT sicob_analisis_sobreposicion(''{"lyr_in":"uploads.f20170704gcfebdac5d7c097","doanalisys":["ASL"]}''::json)','SELECT sicob_analisis_sobreposicion(''{"lyr_in":"uploads.f20170704gcfebdac5d7c097","doanalisys":["ATE"]}''::json)'];
   
 	SELECT current_database(),CURRENT_USER INTO db,username;
-	connectstring := QUOTE_LITERAL('password=Abt2017! dbname=' || db || ' user=' || username);
+	connectstring := QUOTE_LITERAL('password=Abt2016! dbname=' || db || ' user=' || username);
 	--RAISE NOTICE '%', connectstring;
   _max_connections := COALESCE( (_opt->>'max_connections')::int, 2);
   
