@@ -1,6 +1,6 @@
-set PATH_OGR2OGR=C:\OSGeo4W64\bin\ogr2ogr.exe
-set PATH_GDB=\\abt-sdc\imgenes procesadas\ABT_COBERTURAS\Geodatabase.gdb
-set pghost=192.168.50.9
+set PATH_OGR2OGR=C:\Program Files\QGIS 3.2\bin\ogr2ogr.exe
+set PATH_GDB=F:\ASIG\coberturas\Geodatabase.gdb
+set pghost=localhost
 set pgport=5432
 set pgdb=geodatabase
 set pguser=admderechos
