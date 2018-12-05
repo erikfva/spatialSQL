@@ -1,3 +1,4 @@
+SET CLIENT_ENCODING TO 'utf8';
 CREATE OR REPLACE FUNCTION public.sicob_snap_edge(_opt json)
  RETURNS json
  LANGUAGE plpgsql
@@ -36,10 +37,10 @@ BEGIN
 --> condition_a (opcional): Filtro para los datos de "a". Si no se especifica, se toman todos los registros.
 --> b : capa de poligonos a cuyos bordes se ajustaran los poligonos de "a".
 --> condition_b (opcional): Filtro para los datos de "b". Si no se especifica, se toman todos los registros.
---> subfix (opcional): texto adicional que se agregar� al nombre de "a" para formar el nombre de la capa resultante. Si no se especifica por defecto es "_adjusted".
---> schema (opcional): esquema del la BD donde se crear� la capa resultante. Si no se especifica se crear� en "temp".
---> tolerance: Distancia m�xima (en metros) para el autoajuste autom�tico de los bordes de "a" hacia los bordes de "b" (snapping). Si no se especifica, no se realiza autoajuste y la funcion devolvera "a". 
---> temp (opcional true/false) : Indica si la capa resultante ser� temporal mientras dura la transacci�n. Esto se requiere cuando el resultado es utilizado como capa intermedia en otros procesos dentro de la misma transacci�n. Por defecto es FALSE.
+--> subfix (opcional): texto adicional que se agregarÃ¯Â¿Â½ al nombre de "a" para formar el nombre de la capa resultante. Si no se especifica por defecto es "_adjusted".
+--> schema (opcional): esquema del la BD donde se crearÃ¯Â¿Â½ la capa resultante. Si no se especifica se crearÃ¯Â¿Â½ en "temp".
+--> tolerance: Distancia mÃ¯Â¿Â½xima (en metros) para el autoajuste automÃ¯Â¿Â½tico de los bordes de "a" hacia los bordes de "b" (snapping). Si no se especifica, no se realiza autoajuste y la funcion devolvera "a". 
+--> temp (opcional true/false) : Indica si la capa resultante serÃ¯Â¿Â½ temporal mientras dura la transacciÃ¯Â¿Â½n. Esto se requiere cuando el resultado es utilizado como capa intermedia en otros procesos dentro de la misma transacciÃ¯Â¿Â½n. Por defecto es FALSE.
 
 
 ---------------------------
@@ -227,12 +228,12 @@ BEGIN
 ---------------------------
 --PARAMETROS DE ENTRADA
 ---------------------------
--->	_edge: linea del borde que ser� ajustada hacia "target".
+-->	_edge: linea del borde que serÃ¯Â¿Â½ ajustada hacia "target".
 -->	_opt : cadena json con las sigtes. opciones :
 -->		target : Capa con los poligono a cuyos bordes se ajustara "_edge".
 -->		condition : Filtro para la capa "target" (anteponer el prefijo "b.").
--->		tolerance : Distancia m�xima(una aproximaci�n a metros) para el ajuste.
--->		returnpolygon (true/false): Devuelve el resultado convertido a pol�gono. Si no se especifica devuelve una linea de borde.
+-->		tolerance : Distancia mÃ¯Â¿Â½xima(una aproximaciÃ¯Â¿Â½n a metros) para el ajuste.
+-->		returnpolygon (true/false): Devuelve el resultado convertido a polÃ¯Â¿Â½gono. Si no se especifica devuelve una linea de borde.
 -->		  
 
 
@@ -1297,3 +1298,4 @@ SELECT
 	the_geom
 FROM _newedge;
 $function$
+ 
