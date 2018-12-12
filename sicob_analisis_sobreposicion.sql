@@ -131,7 +131,7 @@ IF 'ATE' = ANY(_doanalisys) THEN
         	'a', _lyr_in,
             'condition_a', COALESCE( (_opt->>'condition')::text , 'TRUE'),
             'b', 'coberturas.ate',
-            'condition_b', 'est=''VIGENTE''',
+            'condition_b', 'est_der=''VIGENTE''',
             'subfix', '_ate',
             'schema', 'temp',
             'add_sup_total', true,
@@ -397,9 +397,9 @@ IF 'PDM' = ANY (_doanalisys) THEN
         EXECUTE '
         SELECT array_to_json(array_agg(q)) as detalle
         FROM(
-            select id_a as sicob_id, res_adm, to_char(fec_res, ''YYYY-MM-DD'') as fec_res, nom_pre, sum(sicob_sup) as sicob_sup_sob,
+            select id_a as sicob_id, res_adm, to_char(fec_res, ''YYYY-MM-DD'') as fec_res, raz_soc, sum(sicob_sup) as sicob_sup_sob,
             count(*) as cantidad_poligonos 
-            from ' || (_aux->>'lyr_over')::text || ' group by id_a, res_adm,res_adm, fec_res, nom_pre
+            from ' || (_aux->>'lyr_over')::text || ' group by id_a, res_adm,res_adm, fec_res, raz_soc
             order by fec_res
          )q;' INTO detalle;
          --EXECUTE format(sql,_aux->>'lyr_over',_lyr_in) INTO detalle;
