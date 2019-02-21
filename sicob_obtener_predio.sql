@@ -96,7 +96,7 @@ lyrs_predio := '[{
         "tolerance":"0",
         "lyr_parc":{
         	"source":"coberturas.predios_pop",
-            "fldpredio":"nom_pre",
+            "fldpredio":"raz_soc",
             "fldpropietario":"nom_pro"
         }
     },
