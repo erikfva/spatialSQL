@@ -131,7 +131,7 @@ _intersected AS (
             'b',b,
             'condition_b',condition_b,
             'schema', _schema,
-            'temp', TRUE,
+            'temp', _temp, --TRUE,
             'filter_overlap',filter_overlap,
             'add_sup_total',add_sup_total,
             'min_sup', min_sup,

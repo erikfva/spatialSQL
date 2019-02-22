@@ -9,6 +9,7 @@ DECLARE
   _aux json := '{}'; 
   _out json := '{}'; 
   b TEXT;
+  s TEXT; -- aux variable
   _superficie_in float;
   sql text;
   detalle json;
@@ -140,11 +141,13 @@ IF 'ATE' = ANY(_doanalisys) THEN
     );
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se ha encontrado sobreposicion.
         -->Almacenando la informacion para generar shapefiles    	
+        --> 1.- Incluyendo los cortes de ATE que se sobreponen.
         _out_shp := _out_shp::jsonb || 
         jsonb_build_object(
             'lyr',_aux->>'lyr_over',
             'fname', 'sobreposicion_ate'
         ) || 
+        --> 2.- Incluyendo la capa del subconjunto de ATE que se sobreponen.
         jsonb_build_object(
             'lyr', sicob_executesql('
                         SELECT DISTINCT a.* 
@@ -172,7 +175,7 @@ IF 'ATE' = ANY(_doanalisys) THEN
     END IF;
 END IF;
 ----------------------------------------------
---AsociaciÃ³n Sociales del Lugar (ASL)
+--Asociacion Sociales del Lugar (ASL)
 ----------------------------------------------
 IF 'ASL' = ANY (_doanalisys) THEN
     _aux := sicob_overlap(
@@ -351,10 +354,14 @@ IF 'POP' = ANY (_doanalisys) THEN
 
         
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.pop_uso_vigente","nombre":"Plan de Ordenamiento  Predial (POP)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
+         s := sicob_no_geo_column((_aux->>'lyr_over')::text,
+         	'{id_a, res_adm, uso_pop, des_uso, sicob_sup}',
+            't.');
          EXECUTE '
          SELECT array_to_json(array_agg(q)) as detalle
         FROM(
-         SELECT id_a as sicob_id, res_adm as resol_pop, uso_pop, des_uso, sum(sicob_sup) as sicob_sup FROM ' || (_aux->>'lyr_over')::text || ' group by id_a, res_adm, uso_pop,des_uso)q;' INTO detalle;
+         SELECT id_a as sicob_id, res_adm, uso_pop, des_uso,' || s ||', sum(sicob_sup) as sicob_sup FROM ' || (_aux->>'lyr_over')::text || ' t ' ||
+         'group by id_a, res_adm, uso_pop,des_uso,' || s || ')q;' INTO detalle;
         _aux := _aux::jsonb || ('{"detalle":' || detalle || '}')::jsonb;
         _out := _out::jsonb || ('{"POP_USO":' || _aux::text || '}')::jsonb; 
     END IF;
@@ -394,12 +401,16 @@ IF 'PDM' = ANY (_doanalisys) THEN
         );
                 
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.pdm","nombre":"Plan de Desmonte (PDM)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
+        s := sicob_no_geo_column((_aux->>'lyr_over')::text,
+         	'{id_a, res_adm, fec_res, raz_soc, sicob_sup}',
+            't.');
         EXECUTE '
         SELECT array_to_json(array_agg(q)) as detalle
         FROM(
-            select id_a as sicob_id, res_adm, to_char(fec_res, ''YYYY-MM-DD'') as fec_res, raz_soc, sum(sicob_sup) as sicob_sup_sob,
+            select id_a as sicob_id, res_adm, to_char(fec_res, ''YYYY-MM-DD'') as fec_res, raz_soc,' || s || ', sum(sicob_sup) as sicob_sup_sob,
             count(*) as cantidad_poligonos 
-            from ' || (_aux->>'lyr_over')::text || ' group by id_a, res_adm,res_adm, fec_res, raz_soc
+            from ' || (_aux->>'lyr_over')::text || ' t ' || 
+            'group by id_a, res_adm,res_adm, fec_res, raz_soc, ' || s || '
             order by fec_res
          )q;' INTO detalle;
          --EXECUTE format(sql,_aux->>'lyr_over',_lyr_in) INTO detalle;
