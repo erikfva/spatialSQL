@@ -270,28 +270,11 @@ END IF;
     --CALCULANDO LA SUPERFICIE TOTAL RESULTANTE en HA.
     IF COALESCE((_opt->>'add_sup_total')::boolean, FALSE) THEN
     	IF row_cnt > 0 THEN
-            sql := '
-            WITH
-            diff AS (
-                SELECT * FROM
-              ' || 
-              (sicob_dissolve(
-                  json_build_object(
-                      'lyr_in', __a,
-                      'fldgroup', 'sicob_utm',
-                      'fldgeom', 'the_geomutm',
-                      'temp', true
-                  )
-              )->>'lyr_diss')::text || '                
-            ),
-            superficies AS (
-                SELECT
-                	sicob_utm, st_area(the_geomutm)/10000 as sicob_sup
-                FROM 
-                	diff
-            )
-            SELECT sum(sicob_sup) as sicob_sup
-            FROM superficies';    
+        	sql := '
+            	SELECT sum(sicob_sup) as sicob_sup FROM ' || 
+                sicob_fix_si(__a)
+                || '
+            ';
             EXECUTE sql INTO sicob_sup_total;
         ELSE
         	sicob_sup_total := 0;
