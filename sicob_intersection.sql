@@ -299,58 +299,11 @@ END IF;
     --CALCULANDO LA SUPERFICIE TOTAL SOBREPUESTA de "a" en HA.
     IF COALESCE((_opt->>'add_sup_total')::boolean, FALSE) THEN
     	IF row_cnt > 0 THEN
-            sql := '
-            WITH
-            inter AS (
-              SELECT * FROM 
-              ' || 
-              (sicob_dissolve(
-                  json_build_object(
-                      'lyr_in', __a,
-                      'fldgroup', 'sicob_utm',
-                      'fldgeom', 'the_geomutm',
-                      'temp', true
-                  )
-              )->>'lyr_diss')::text || '
-            ),
-            origen AS (
-            	SELECT * FROM ' || 
-                (sicob_dissolve(
-                  json_build_object(
-                      'lyr_in', 'a_inters_b',
-                      'lyr_sql','
-                        SELECT
-                            ST_Transform(the_geom, sicob_utm) as the_geomutm, sicob_utm
-                        FROM (
-                          SELECT DISTINCT
-                              a.the_geom,  a.sicob_id, SICOB_utmzone_wgs84(a.the_geom) as sicob_utm
-                          FROM ' || a || ' a 
-                          INNER JOIN ' || __a || ' b 
-                          ON (a.sicob_id = b.id_a)
-                        ) t                      
-                      ',
-                      'fldgroup', 'sicob_utm',
-                      'fldgeom', 'the_geomutm',
-                      'temp', true
-                  )
-                )->>'lyr_diss')::text               
+        	sql := '
+            	SELECT sum(sicob_sup) as sicob_sup FROM ' || 
+                sicob_fix_si(__a)
                 || '
-            ),
-            fixdiff AS (
-                SELECT 
-                o.sicob_utm, st_difference(i.the_geomutm,  
-                st_difference(i.the_geomutm, o.the_geomutm)  ) as fixdiff
-                FROM 
-                inter i LEFT JOIN origen o ON (o.sicob_utm = i.sicob_utm)
-            ),
-            superficies AS (
-                SELECT
-                sicob_utm, st_area(fixdiff)/10000 as sicob_sup
-                FROM 
-                fixdiff
-            )
-            SELECT sum(sicob_sup) as sicob_sup
-            FROM superficies;';    
+            ';
             EXECUTE sql INTO sicob_sup_total;
         ELSE
         	sicob_sup_total := 0;

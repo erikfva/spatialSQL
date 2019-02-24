@@ -378,7 +378,7 @@ IF 'PDM' = ANY (_doanalisys) THEN
             'subfix', '_pdm',
             'schema', 'temp',
             'add_sup_total', true,
-            'filter_overlap', false
+            'filter_overlap', true
         )    
 	);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se ha encontrado sobreposicion.
