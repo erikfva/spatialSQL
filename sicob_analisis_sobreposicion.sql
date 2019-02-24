@@ -407,7 +407,7 @@ IF 'PDM' = ANY (_doanalisys) THEN
         EXECUTE '
         SELECT array_to_json(array_agg(q)) as detalle
         FROM(
-            select id_a as sicob_id, res_adm, to_char(fec_res, ''YYYY-MM-DD'') as fec_res, raz_soc,' || s || ', sum(sicob_sup) as sicob_sup_sob,
+            select id_a as sicob_id, res_adm, to_char(fec_res, ''YYYY-MM-DD'') as fec_res, raz_soc,' || s || ', sum(sicob_sup) as sicob_sup,
             count(*) as cantidad_poligonos 
             from ' || (_aux->>'lyr_over')::text || ' t ' || 
             'group by id_a, res_adm,res_adm, fec_res, raz_soc, ' || s || '
