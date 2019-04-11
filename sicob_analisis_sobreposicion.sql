@@ -8,6 +8,7 @@ DECLARE
   _workers integer;
   _aux json := '{}'; 
   _out json := '{}'; 
+  
   b TEXT;
   s TEXT; -- aux variable
   _superficie_in float;
@@ -20,7 +21,7 @@ DECLARE
     _paralell_opt json := '{}';
 	_partial_result json := '{}';
     _out_shp json := '[]'::json; --'{"lyr_list":[{"lyr": "processed.f20170704efgdcab41a98021_nsi", "fname": "Capa1", "condition":  {"nombre": "Poligono2"} }]}';
-
+	_debug boolean := COALESCE((_opt->>'debug')::boolean, FALSE);
 BEGIN
 ---------------------------
 --PARAMETROS DE ENTRADA
@@ -30,6 +31,7 @@ BEGIN
 --> doanalisys : Array del listado de analisis a aplicar, ej. "doanalisys":["TPFP","ASL"].
 --> 	Si no se especifica se realizan todos los analisis.
 --> workers : Cantidad de procesos para trabajar en paralelo, por defecto es 1 con lo se trabaja de forma secuencial (mas lento), se recomienda de 3 a 7 para no sobrecargar.
+--> debug (opcional): Valor TRUE o FALSE para mostrar informacion del proceso para depurar.
 ---------------------------
 --VALORES DEVUELTOS
 ---------------------------
@@ -127,6 +129,11 @@ EXECUTE 'SELECT sum(sicob_sup) FROM ' || _lyr_in ||
 --Autorizaciones Transitorias Especiales (ATE)
 ----------------------------------------------
 IF 'ATE' = ANY(_doanalisys) THEN
+	
+    IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: ATE';
+    END IF;
+    
     _aux := sicob_overlap(
     	json_build_object(
         	'a', _lyr_in,
@@ -178,6 +185,11 @@ END IF;
 --Asociacion Sociales del Lugar (ASL)
 ----------------------------------------------
 IF 'ASL' = ANY (_doanalisys) THEN
+    
+    IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: ASL';
+    END IF;
+    
     _aux := sicob_overlap(
     	json_build_object(
         	'a', _lyr_in,
@@ -225,6 +237,9 @@ END IF;
 --Plan Gral. de Manejo Forestal  (PGMF)
 ----------------------------------------------
 IF 'PGMF' = ANY (_doanalisys) THEN
+    IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: PGMF';
+    END IF;
     _aux := sicob_overlap(
     	json_build_object(
         	'a', _lyr_in,
@@ -271,6 +286,9 @@ END IF;
 --Plan Operativo Anual Forestal (POAF)
 ----------------------------------------------
 IF 'POAF' = ANY (_doanalisys) THEN
+    IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: POAF';
+    END IF;
     _aux := sicob_overlap(
     	json_build_object(
         	'a', _lyr_in,
@@ -317,6 +335,9 @@ END IF;
 --Plan de Ordenamiento  Predial (POP)
 ----------------------------------------------
 IF 'POP' = ANY (_doanalisys) THEN
+    IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: POP';
+    END IF;
     _aux := sicob_overlap(
     	json_build_object(
         	'a', _lyr_in,
@@ -370,6 +391,9 @@ END IF;
 --Plan de Desmonte (PDM)
 ----------------------------------------------
 IF 'PDM' = ANY (_doanalisys) THEN
+    IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: PDM';
+    END IF;
     _aux := sicob_overlap(
     	json_build_object(
         	'a', _lyr_in,
@@ -422,6 +446,9 @@ END IF;
 --Reservas Forestales (RF)
 ----------------------------------------------
 IF 'RF' = ANY (_doanalisys) THEN
+    IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: RF';
+    END IF;
     _aux := sicob_overlap(
     	json_build_object(
         	'a', _lyr_in,
@@ -470,6 +497,9 @@ END IF;
 --Reservas Privada de Patrimonio  Natural (RPPN)
 ----------------------------------------------
 IF 'RPPN' = ANY (_doanalisys) THEN
+    IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: RPPN';
+    END IF;
     _aux := sicob_overlap(
     	json_build_object(
         	'a', _lyr_in,
@@ -516,6 +546,9 @@ END IF;
 --Tierras de Produccion Forestal Permanente (TPFP)
 ----------------------------------------------
 IF 'TPFP' = ANY (_doanalisys) THEN
+    IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: TPFP';
+    END IF;
     _aux := sicob_overlap(
     	json_build_object(
         	'a', _lyr_in,
@@ -554,6 +587,9 @@ END IF;
 --Plan de Uso de Suelo (PLUS)
 ----------------------------------------------
 IF 'PLUS' = ANY (_doanalisys) THEN
+    IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: PLUS';
+    END IF;
     _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.plus","subfix":"_plus", "add_diff":true,"schema":"temp","add_sup_total":true, "add_geoinfo":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se ha encontrado sobreposicion.
 		
@@ -591,6 +627,9 @@ IF 'PLUS' = ANY (_doanalisys) THEN
     ----------------------------------------------
     --Capacidad de Uso Mayor de la Tierra (CUMAT)
     ----------------------------------------------
+    	IF _debug THEN
+    		RAISE NOTICE 'sicob_analisis_sobreposicion: CUMAT';
+    	END IF;
         b := _aux->>'lyr_over';
         _aux := sicob_overlap(('{"a":"' || b || '","condition_a":"codigo IS NULL", "b":"coberturas.cumat","subfix":"_cumat", "add_diff":true,"schema":"temp","add_sup_total":true, "add_geoinfo":true}')::json);
         IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se ha encontrado sobreposicion.
@@ -638,6 +677,9 @@ END IF;
 --Desmontes Inscritos Ley 337 (D337)
 ----------------------------------------------
 IF 'D337' = ANY (_doanalisys) THEN
+	IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: D337';
+    END IF;
     _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.d337","subfix":"_d337","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado desmontes.
     
@@ -675,6 +717,9 @@ END IF;
 --Desmontes Ilegales con Proceso Administrativo Sancionatorio (DPAS)
 ----------------------------------------------
 IF 'DPAS' = ANY (_doanalisys) THEN
+	IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: DPAS';
+    END IF;
     _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.dpas","subfix":"_dpas","schema":"temp","add_sup_total":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado desmontes.
         
@@ -712,6 +757,9 @@ END IF;
 --Areas Protegidas Nacionales (APN)
 ----------------------------------------------
 IF 'APN' = ANY (_doanalisys) THEN
+	IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: APN';
+    END IF;
     _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.apn","subfix":"_apn","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se ha encontrado sobreposicion.
         
@@ -749,6 +797,9 @@ END IF;
 --Areas Protegidas Departamentales (APD)
 ----------------------------------------------
 IF 'APD' = ANY (_doanalisys) THEN
+	IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: APD';
+    END IF;
     _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.apd","subfix":"_apd","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se ha encontrado sobreposicion.
         
@@ -786,6 +837,9 @@ END IF;
 --Areas Protegidas Municipales (APM)
 ----------------------------------------------
 IF 'APM' = ANY (_doanalisys) THEN
+	IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: APM';
+    END IF;
     _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.apm","subfix":"_apm","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se ha encontrado sobreposicion.
         

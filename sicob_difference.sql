@@ -67,6 +67,94 @@ SELECT * FROM sicob_split_table_name(b::text) INTO sch_nameB, tbl_nameB;
 
 row_cnt := 0;
 
+IF b = '' THEN --> Si b es un conjunto vacio.
+    -->devuelve la misma de entrada.
+    EXECUTE '
+    SELECT count(*) as row_cnt, 
+    sum(st_area(ST_Transform(the_geom, SICOB_utmzone_wgs84(the_geom) ))/10000) as sicob_sup 
+    FROM ' || a INTO row_cnt, sicob_sup_total;
+    RETURN json_build_object(
+    	'diff_sup', sicob_sup_total,
+        'lyr_difference', a,
+        'features_diff_cnt', row_cnt
+    );
+END IF;
+
+
+sql := '
+  WITH 
+  b_inter_a AS (
+      select  
+          distinct b.sicob_id as id_b, b.the_geom
+      from 
+      ' || a || ' a 
+      INNER JOIN ' || b || ' b
+      ON (st_intersects(a.the_geom, b.the_geom) AND NOT ST_Touches(a.the_geom, b.the_geom))
+  ),
+  b_inter_a_diss AS (
+      SELECT st_union(the_geom) as the_geom 
+      FROM b_inter_a
+  ),
+  a_diff_b AS (
+      SELECT 
+          a.sicob_id as id_a, st_difference(a.the_geom, ( SELECT the_geom FROM b_inter_a_diss limit 1) ) as the_geom
+      FROM 
+      ' || a || ' a
+  ),
+  a_diff_b_fixsliver AS (
+      SELECT 
+      id_a,
+        st_buffer( 
+              st_buffer( the_geom ,-0.0000001,''endcap=flat join=bevel''), --> umbral de 0.5cm
+              0.0000001,''endcap=flat join=bevel''
+       ) as the_geom
+      FROM a_diff_b
+      WHERE 
+      trunc(st_area(the_geom)*10000000000) > 0
+  )
+  SELECT 
+  	row_number() over() as sicob_id, 
+    id_a, 
+    SICOB_utmzone_wgs84(the_geom) as sicob_utm, 
+    round((ST_Area(ST_Transform(the_geom, SICOB_utmzone_wgs84(the_geom)))/10000)::numeric,5) as sicob_sup,
+    the_geom
+  FROM 
+  	a_diff_b_fixsliver
+  WHERE 
+  	ST_IsEmpty(the_geom) = FALSE
+  ORDER BY id_a
+';
+
+__a := tbl_nameA || _subfixresult;
+IF COALESCE((_opt->>'temp')::boolean, FALSE) THEN
+    EXECUTE 'DROP TABLE IF EXISTS ' || __a;
+    EXECUTE 'CREATE TEMPORARY TABLE ' || __a || ' ON COMMIT DROP AS ' || sql;
+ELSE
+    __a := _schema || '.' || __a;
+    EXECUTE 'DROP TABLE IF EXISTS ' || __a;
+    EXECUTE 'CREATE UNLOGGED TABLE ' || __a || ' AS ' || sql;
+END IF;
+GET DIAGNOSTICS row_cnt = ROW_COUNT; -->obteniendo la cantidad de registros creados.
+EXECUTE 'ALTER TABLE ' || __a || ' ADD PRIMARY KEY (sicob_id);';
+
+_out := ('{"lyr_difference":"' || __a || '","features_diff_cnt":"' || row_cnt || '"}')::json;
+
+--CALCULANDO LA SUPERFICIE TOTAL RESULTANTE en HA.
+IF COALESCE((_opt->>'add_sup_total')::boolean, FALSE) THEN
+    IF row_cnt > 0 THEN
+        sql := '
+            SELECT 
+            sum(st_area(ST_Transform(the_geom, SICOB_utmzone_wgs84(the_geom) ))/10000) as sicob_sup
+            FROM ' || __a;
+        EXECUTE sql INTO sicob_sup_total;
+    ELSE
+        sicob_sup_total := 0;
+    END IF;
+    _out := _out::jsonb || jsonb_build_object('diff_sup',sicob_sup_total);
+END IF;
+   
+RETURN _out;
+
 IF b <> '' THEN --> Si b no es un conjunto vacio.
     --> CREANDO LOS PARES de indices (ai,bi) DE LOS POLIGONOS QUE SE INTERSECTAN
     a__b := 'a__b';

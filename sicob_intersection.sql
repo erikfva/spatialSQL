@@ -72,8 +72,77 @@ END IF;
 
 SELECT *,a::regclass::oid FROM sicob_split_table_name(a::text) INTO sch_nameA, tbl_nameA, oidA ;
 SELECT *,b::regclass::oid FROM sicob_split_table_name(b::text)  INTO sch_nameB, tbl_nameB, oidB;
---oidA := a::regclass::oid;
---oidB := b::regclass::oid;
+
+sql := '
+  WITH 
+  b_inter_a AS (
+      select  
+          distinct b.sicob_id, b.the_geom
+      from 
+      ' || a || ' a 
+      INNER JOIN ' || b || ' b
+      ON (st_intersects(a.the_geom, b.the_geom) AND NOT ST_Touches(a.the_geom, b.the_geom))
+  ),
+  grouppolygons AS (
+      SELECT
+          ''1'' as idgroup,
+          st_multi(
+              st_union(
+                  the_geom                
+              )
+          )
+          AS the_geom
+      FROM
+         b_inter_a
+      GROUP BY idgroup
+  ),
+  buff AS (
+      SELECT 
+          idgroup,
+          st_buffer(
+              the_geom,
+              5::float/111000, ''join=mitre mitre_limit=5.0''
+          ) as the_geom
+      FROM 
+          grouppolygons
+  ),
+  b_inter_a_diss AS (
+      SELECT 
+          idgroup, st_union(the_geom) AS the_geom
+      FROM (
+          SELECT
+            idgroup,
+            st_buffer(
+                st_makepolygon(
+                    st_exteriorring(
+                        (st_dump(the_geom)).geom
+                    )
+                ),
+                -5::float/111000, ''join=mitre mitre_limit=5.0''
+            ) as the_geom
+          FROM  buff
+      ) t
+      GROUP BY idgroup
+  ),
+  a_inter_b AS (
+      SELECT 
+          a.sicob_id, st_intersection(a.the_geom, ( SELECT the_geom FROM b_inter_a_diss limit 1) ) as the_geom
+      FROM 
+      ' || a || ' a
+  ),
+  a_inter_b_fixsliver AS (
+      SELECT 
+      sicob_id,
+      the_geom
+      FROM a_inter_b
+      WHERE 
+      trunc(st_area(the_geom)*10000000000) > 0
+  )
+  SELECT 
+      sicob_id, the_geom
+  FROM 
+      a_inter_b_fixsliver
+';
 
 
 --> CREANDO LOS PARES de indices (ai,bi) DE LOS POLIGONOS QUE SE INTERSECTAN
@@ -186,19 +255,7 @@ ELSE
 			id_a, id_b, (dp).geom as the_geom
         FROM (
         	SELECT id_a, id_b, st_dump(the_geom) as dp FROM ' || tbl_nameA || '_inters' || ' x
-        ) w
-        /*
-        UNION ALL 
-        SELECT 
-        	id_a, id_b, the_geom
-        FROM 
-        	' || tbl_nameA || '_fullcovered
-		UNION ALL
-        SELECT 
-        	id_a, id_b, the_geom
-        FROM 
-        	' || tbl_nameB || '_fullcovered 
-        */       
+        ) w      
     ';
     sql := '
     	WITH
@@ -218,21 +275,6 @@ ELSE
             ) t
             WHERE 
             	trunc(st_area(t.the_geom)*10000000000) > 0
-/***
-            	AND
-                trunc(
-                	st_area(
-                    	st_intersection(
-                        	st_buffer(
-                            	st_buffer(the_geom,-0.000001,''join=mitre''),
-                                0.000001,
-                                ''join=mitre''
-                            ),
-                            the_geom
-                        )
-                    ) * 10000000000
-                ) > 0
-***/ 
         )
         SELECT 
         	row_number() over() AS sicob_id,
@@ -272,6 +314,11 @@ END IF;
     EXECUTE 'DROP INDEX IF EXISTS id_a_' || oidA || '_inter_' ||  oidB || _subfixresult;
     RAISE DEBUG 'CREANDO INDICE... : %', 'id_a_' || oidA || '_inter_' ||  oidB || _subfixresult;
     EXECUTE 'CREATE INDEX id_a_' || oidA || '_inter_' ||  oidB || _subfixresult || ' ON ' || __a || ' USING btree (id_a);';
+
+    EXECUTE 'DROP INDEX IF EXISTS the_geom_' || oidA || '_inter_' ||  oidB || _subfixresult;
+    RAISE DEBUG 'CREANDO INDICE... : %', 'the_geom_' || oidA || '_inter_' ||  oidB || _subfixresult;
+    EXECUTE 'CREATE INDEX the_geom_' || oidA || '_inter_' ||  oidB || _subfixresult || ' ON ' || __a || ' USING GIST (the_geom);';
+    EXECUTE 'CLUSTER ' || __a || ' USING the_geom_' || oidA || '_inter_' ||  oidB || _subfixresult;
     
     --Corriguiendo geometrias con errores 
     /*
@@ -295,14 +342,41 @@ END IF;
     */
     
  	_out := ('{"lyr_intersected":"' || __a || '","features_inters_cnt":"' || row_cnt || '"}')::json;
+
 	   
     --CALCULANDO LA SUPERFICIE TOTAL SOBREPUESTA de "a" en HA.
     IF COALESCE((_opt->>'add_sup_total')::boolean, FALSE) THEN
     	IF row_cnt > 0 THEN
+        	/*
         	sql := '
             	SELECT sum(sicob_sup) as sicob_sup FROM ' || 
                 sicob_fix_si(__a)
                 || '
+            ';
+            */
+            sql := '
+              WITH
+              fix_sliver AS (
+                SELECT
+                sicob_id,
+                st_buffer(
+                  st_buffer(
+                      the_geom, 0.00000000001
+                  ), -0.00000000001
+                ) 
+                as the_geom
+                FROM
+                ' || __a || '
+              ),
+              diss AS (
+                SELECT
+                st_union(the_geom) as the_geom
+                FROM
+                fix_sliver
+              )
+              select 
+              round((ST_Area(ST_Transform(the_geom, SICOB_utmzone_wgs84(the_geom)))/10000)::numeric,5)
+              from diss
             ';
             EXECUTE sql INTO sicob_sup_total;
         ELSE
@@ -310,7 +384,7 @@ END IF;
         END IF;
         _out := _out::jsonb || jsonb_build_object('inters_sup',sicob_sup_total);
     END IF;
-   
+  
     RETURN _out;
     
 
