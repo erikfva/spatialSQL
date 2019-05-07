@@ -49,6 +49,7 @@ BEGIN
 --_opt := '{"lyr_in":"uploads.f20170704gcfebdac5d7c097","doanalisys":["TPFP","ASL","ATE","PLUS"]}'::json;
 --_opt := '{"lyr_in":"processed.f20171107adgecfb25a069f4_nsi"}'::json;
 --_opt := '{"lyr_in":"processed.f20170809cfabdeg77d7b0d4_nsi","doanalisys":["ATE"],"workers":"5"}'::json;
+--_opt := '{"lyr_in":"uploads.f20190507fcdbegaaacb93d9", "debug":"TRUE"}'::json;
 IF COALESCE( (_opt->>'doanalisys')::text , '') <> '' THEN
 	SELECT array_agg(regexp_replace(u::text,'"','','g')) FROM
 	(

@@ -51,11 +51,12 @@ BEGIN
 --> lyr_difference : capa resultante con elementos de "a" que no se intersectan con "b". Solo se incluyen dos campos: sicob_id,the_geom.
 
 --_opt := '{"a":"temp.f20170718fagebdcf580ac83_nsi_tit_tioc_adjust","b":"","subfix":"_diff", "schema":"temp"}';
+--_opt := '{"a":"uploads.f20190507gfcdeba00508ed1","b":"coberturas.predios_pop","subfix":"_diff", "schema":"temp"}';
 
 a := (_opt->>'a')::TEXT;
 _condition_a := COALESCE((_opt->>'condition_a')::text, 'TRUE');
 
-b := (_opt->>'b')::TEXT;
+b := COALESCE((_opt->>'b')::TEXT, '');
 _condition_b := COALESCE((_opt->>'condition_b')::text, 'TRUE');
 
 _subfixresult := COALESCE(_opt->>'subfix','_diff'); 
@@ -66,64 +67,77 @@ SELECT * FROM sicob_split_table_name(a::text) INTO sch_nameA, tbl_nameA;
 SELECT * FROM sicob_split_table_name(b::text) INTO sch_nameB, tbl_nameB;
 
 row_cnt := 0;
+sql := '';
 
-IF b = '' THEN --> Si b es un conjunto vacio.
-    -->devuelve la misma de entrada.
-    EXECUTE '
-    SELECT count(*) as row_cnt, 
-    sum(st_area(ST_Transform(the_geom, SICOB_utmzone_wgs84(the_geom) ))/10000) as sicob_sup 
-    FROM ' || a INTO row_cnt, sicob_sup_total;
-    RETURN json_build_object(
-    	'diff_sup', sicob_sup_total,
-        'lyr_difference', a,
-        'features_diff_cnt', row_cnt
-    );
-END IF;
-
-
-sql := '
-  WITH 
-  b_inter_a AS (
-      select  
-          distinct b.sicob_id as id_b, b.the_geom
-      from 
+IF b <> '' THEN
+	sql := '      
+    select  
+    	distinct b.sicob_id as id_b, b.the_geom
+    from 
       ' || a || ' a 
       INNER JOIN ' || b || ' b
-      ON (st_intersects(a.the_geom, b.the_geom) AND NOT ST_Touches(a.the_geom, b.the_geom))
-  ),
-  b_inter_a_diss AS (
-      SELECT st_union(the_geom) as the_geom 
-      FROM b_inter_a
-  ),
-  a_diff_b AS (
+      ON (st_intersects(a.the_geom, b.the_geom) AND NOT ST_Touches(a.the_geom, b.the_geom))';
+	_out := sicob_executesql( 
+            	sql,
+            	json_build_object(
+                      'table_out', a || '_i_b',
+                      'temp', true,
+                      'create_index', true
+                )
+			);
+    sql := '';
+END IF;
+
+--> Caso: Si B es conjunto vacio o no existe interseccion de A con B
+--	se debe devolver a
+IF b = '' or COALESCE((_out->>'row_cnt')::integer, 1) = 0 THEN --> Si b es un conjunto vacio.   
+    --> No existe interseccion. Retornar todos los poligonos de "a".
+        sql := '
+        SELECT 
+        	a.sicob_id, a.sicob_id as id_a,
+            SICOB_utmzone_wgs84(the_geom) as sicob_utm,
+            st_area(ST_Transform(the_geom, SICOB_utmzone_wgs84(the_geom) ))/10000 as sicob_sup,
+        	a.the_geom 
+		FROM ' || a || ' a WHERE ' || _condition_a;
+END IF;
+
+IF sql = '' THEN
+    sql := '
+      WITH 
+      b_inter_a_diss AS (
+          SELECT st_union(the_geom) as the_geom 
+          FROM ' || (_out->>'table_out')::text || '
+      ),
+      a_diff_b AS (
+          SELECT 
+              a.sicob_id as id_a, st_difference(a.the_geom, ( SELECT the_geom FROM b_inter_a_diss limit 1) ) as the_geom
+          FROM 
+          ' || a || ' a
+      ),
+      a_diff_b_fixsliver AS (
+          SELECT 
+          id_a,
+            st_buffer( 
+                  st_buffer( the_geom ,-0.0000001,''endcap=flat join=bevel''), --> umbral de 0.5cm
+                  0.0000001,''endcap=flat join=bevel''
+           ) as the_geom
+          FROM a_diff_b
+          WHERE 
+          trunc(st_area(the_geom)*10000000000) > 0
+      )
       SELECT 
-          a.sicob_id as id_a, st_difference(a.the_geom, ( SELECT the_geom FROM b_inter_a_diss limit 1) ) as the_geom
+        row_number() over() as sicob_id, 
+        id_a, 
+        SICOB_utmzone_wgs84(the_geom) as sicob_utm, 
+        round((ST_Area(ST_Transform(the_geom, SICOB_utmzone_wgs84(the_geom)))/10000)::numeric,5) as sicob_sup,
+        the_geom
       FROM 
-      ' || a || ' a
-  ),
-  a_diff_b_fixsliver AS (
-      SELECT 
-      id_a,
-        st_buffer( 
-              st_buffer( the_geom ,-0.0000001,''endcap=flat join=bevel''), --> umbral de 0.5cm
-              0.0000001,''endcap=flat join=bevel''
-       ) as the_geom
-      FROM a_diff_b
+        a_diff_b_fixsliver
       WHERE 
-      trunc(st_area(the_geom)*10000000000) > 0
-  )
-  SELECT 
-  	row_number() over() as sicob_id, 
-    id_a, 
-    SICOB_utmzone_wgs84(the_geom) as sicob_utm, 
-    round((ST_Area(ST_Transform(the_geom, SICOB_utmzone_wgs84(the_geom)))/10000)::numeric,5) as sicob_sup,
-    the_geom
-  FROM 
-  	a_diff_b_fixsliver
-  WHERE 
-  	ST_IsEmpty(the_geom) = FALSE
-  ORDER BY id_a
-';
+        ST_IsEmpty(the_geom) = FALSE
+      ORDER BY id_a
+    ';
+END IF;
 
 __a := tbl_nameA || _subfixresult;
 IF COALESCE((_opt->>'temp')::boolean, FALSE) THEN
