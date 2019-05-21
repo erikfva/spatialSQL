@@ -1,6 +1,6 @@
 SET CLIENT_ENCODING TO 'utf8';
 CREATE OR REPLACE FUNCTION public.sicob_overlap(_opt json)
- RETURNS json
+ RETURNS jsonb
  LANGUAGE sql
  STABLE
 AS $function$
@@ -28,6 +28,150 @@ AS $function$
 --> features_diff_cnt : cantidad de poligonos que NO se intersectan.
 --> sicob_sup_total : superficie total sobrepuesta en hectareas. (si se indicÃ³ cualquiera de los parÃ¡metro "add_sup_total/min_sup/add_geoinfo")
 
+
+WITH
+_params AS (
+SELECT 
+	--'processed.f20171005fgcbdae84fb9ea1_nsi'::text as a,
+    COALESCE((opt->>'a')::text,'') as a,
+    (SELECT table_name FROM sicob_split_table_name((opt->>'a')::text)) as tbl_a,
+    COALESCE((opt->>'condition_a')::text,'TRUE') as condition_a,
+    COALESCE((opt->>'b')::text,'') as b,
+    COALESCE((opt->>'condition_b')::text,'TRUE') as condition_b,
+	COALESCE((opt->>'tolerance')::text,'0') as tolerance,
+    COALESCE((opt->>'temp')::boolean,FALSE) as _temp,
+    COALESCE((opt->>'subfix')::text,'_overlap') as subfix,
+    COALESCE((opt->>'schema')::text,'temp') as _schema,
+    COALESCE((opt->>'add_geoinfo')::boolean,FALSE) as add_geoinfo,
+    COALESCE((opt->>'add_diff')::boolean,FALSE) as add_diff,
+    COALESCE((opt->>'min_sup')::real,0::real) as min_sup,
+    COALESCE((opt->>'add_sup_total')::boolean,FALSE) as add_sup_total,
+    COALESCE((opt->>'filter_overlap')::boolean,TRUE) as filter_overlap,
+    -- CREANDO EL NOMBRE PARA LA TABLA DE SALIDA
+    CASE WHEN COALESCE((opt->>'temp')::boolean,FALSE) THEN
+    	''
+    ELSE
+    	COALESCE((opt->>'schema')::text,'temp') || '.'
+    END ||
+    (SELECT table_name FROM sicob_split_table_name((opt->>'a')::text)) ||
+    COALESCE((opt->>'subfix')::text,'_overlap') as tbl_out
+ FROM (
+ 	SELECT 
+    -- USAR PARA PRUEBAS
+    /*
+    json_build_object(
+     	'a', 'uploads.f20190515fgdcbead21d39cd',
+        'b', 'coberturas.predios_titulados',
+        'add_sup_total', TRUE,
+        'add_diff', TRUE,
+        'filter_overlap', FALSE,
+        'min_sup', 1
+    ) 
+    */
+    _opt 
+    as opt
+ ) params
+),
+_intersected AS (
+    SELECT 
+    sicob_intersection(
+        json_build_object(
+            'a',a,
+            'condition_a',condition_a,
+            'b',b,
+            'condition_b',condition_b,
+            'schema', _schema,
+            'temp', _temp, --TRUE,
+            'subfix', subfix,
+            'filter_overlap',filter_overlap,
+            'add_sup_total',add_sup_total,
+            'min_sup', min_sup,
+            'add_geoinfo', add_geoinfo,
+            'add_fields', TRUE
+        )
+    ) as res_inter
+    FROM _params limit 1
+),
+_difference AS (
+    SELECT
+    CASE WHEN add_diff THEN 
+        sicob_difference(
+            json_build_object(
+                'a',a,
+            	'condition_a',condition_a,
+                'b',b,
+                'condition_b',condition_b,
+                'schema', _schema,
+                'temp',_temp,
+                'add_geoinfo', add_geoinfo,
+                'filter_overlap',filter_overlap,
+                'add_sup_total',add_sup_total,
+				'min_sup', min_sup        
+            )
+        )
+	ELSE
+    	'{}'::json 
+    END as res_diff
+    FROM _params limit 1
+),
+--CLONANDO lyr_intersected
+_clone_intersected AS (
+	SELECT 
+    sicob_executesql('SELECT * FROM ' ||
+    	(SELECT res_inter->>'lyr_intersected' FROM _intersected)::text,
+        json_build_object(
+        	'table_out', tbl_out,
+            'temp', _temp,
+            'create_index', TRUE
+        )
+    ) AS res_clone
+    FROM
+    _params
+),
+_merge_inter_diff AS (
+	SELECT
+	sicob_executesql('insert into ' || (SELECT res_clone->>'table_out' FROM _clone_intersected)::text || '
+      (id_a, source_a, source_b, sicob_sup, the_geom)
+      select 
+       id_a, source_a, source_b, sicob_sup, the_geom
+      from
+      ' || (SELECT res_diff->>'lyr_difference' FROM _difference)::text ,  
+      '{}'::json
+	)->>'row_cnt' as row_cnt
+)
+--SELECT * FROM _merge
+SELECT
+	(SELECT * FROM _intersected)::jsonb || 
+    CASE WHEN add_diff THEN
+    	(SELECT * FROM _difference)::jsonb ||
+        jsonb_build_object(
+            'features_diff_cnt' , (SELECT row_cnt FROM _merge_inter_diff),
+            'lyr_over', tbl_out
+        )
+    ELSE
+        jsonb_build_object(
+            'lyr_over', (SELECT res_inter->>'lyr_intersected' FROM _intersected)::text
+        )
+    END || 
+    CASE WHEN add_sup_total THEN
+    	jsonb_build_object(
+        	'sicob_sup_total',
+            (SELECT res_inter->>'inters_sup' FROM _intersected)::real +       
+            CASE WHEN add_diff THEN
+                (SELECT res_diff->>'diff_sup' FROM _difference)::real  
+            ELSE
+                0
+            END          
+        )
+    ELSE
+        '{}'::jsonb
+    END
+FROM
+_params
+
+
+
+/***********
 WITH
 _params AS (
 SELECT 
@@ -127,7 +271,8 @@ _intersected AS (
     SELECT 
     sicob_intersection(
         json_build_object(
-            'a',(SELECT lyr_adjusted FROM _adjusted LIMIT 1),
+            'a',a,
+            'condition_a',condition_a
             'b',b,
             'condition_b',condition_b,
             'schema', _schema,
@@ -270,7 +415,7 @@ SELECT
         (SELECT summary::json FROM _statistics) as summary
       
  ) r 
- 
+********/ 
 /*
 (SELECT * FROM _intersected) as res_inter,
 (SELECT * FROM _difference) as res_diff,
