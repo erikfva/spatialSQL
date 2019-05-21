@@ -55,7 +55,8 @@ BEGIN
 --_opt := '{"lyr_in":"uploads.f20170926adcgefb27cabb75"}';
 --_opt := '{"lyr_in":"processed.f20170928daecbfg7768f8ae_nsi","min_sup":"0","tolerance":"0"}';
 --_opt := '{"lyr_in":"processed.f20171005fgcbdae84fb9ea1_nsi"}';
---_opt := '{"lyr_in":"uploads.f20190507gfcdeba00508ed1"}';
+--_opt := '{"lyr_in":"uploads.f20190515fgdcbead21d39cd"}';
+
 
 _tolerance := COALESCE((_opt->>'tolerance')::text, '0'); --> 5.3
 
