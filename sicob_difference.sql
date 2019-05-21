@@ -59,7 +59,7 @@ _condition_a := COALESCE((_opt->>'condition_a')::text, 'TRUE');
 b := COALESCE((_opt->>'b')::TEXT, '');
 _condition_b := COALESCE((_opt->>'condition_b')::text, 'TRUE');
 
-_subfixresult := COALESCE(_opt->>'subfix','_diff'); 
+_subfixresult := COALESCE(_opt->>'subfix','') || '_diff'; 
 _schema := COALESCE(_opt->>'schema','temp');
 
 
@@ -72,7 +72,9 @@ sql := '';
 IF b <> '' THEN
 	sql := '      
     select  
-    	distinct b.sicob_id as id_b, b.the_geom
+    	distinct b.sicob_id as id_b, 
+        ''' || a || ''' AS source_a, 
+        ''' || b || ''' AS source_b, b.the_geom
     from 
       ' || a || ' a 
       INNER JOIN ' || b || ' b
@@ -95,6 +97,8 @@ IF b = '' or COALESCE((_out->>'row_cnt')::integer, 1) = 0 THEN --> Si b es un co
         sql := '
         SELECT 
         	a.sicob_id, a.sicob_id as id_a,
+            ''' || a || ''' AS source_a,
+            ''' || b || ''' AS source_b,
             SICOB_utmzone_wgs84(the_geom) as sicob_utm,
             st_area(ST_Transform(the_geom, SICOB_utmzone_wgs84(the_geom) ))/10000 as sicob_sup,
         	a.the_geom 
@@ -115,19 +119,37 @@ IF sql = '' THEN
           ' || a || ' a
       ),
       a_diff_b_fixsliver AS (
+          SELECT *
+          FROM
+          ( SELECT id_a, (st_dump(the_geom)).geom as the_geom FROM a_diff_b) t 
+          WHERE 
+            trunc(
+              st_area(
+                  st_buffer( 
+                    st_buffer( the_geom ,-0.000001,''endcap=flat join=round quad_segs=1''), --> umbral de 0.5cm
+                    0.000001,''endcap=flat join=round quad_segs=1''
+                  )
+              )*10000000000
+            ) > 0
+      /*
           SELECT 
           id_a,
             st_buffer( 
-                  st_buffer( the_geom ,-0.0000001,''endcap=flat join=bevel''), --> umbral de 0.5cm
-                  0.0000001,''endcap=flat join=bevel''
+                  st_buffer( the_geom ,-0.0000001,''endcap=flat join=round quad_segs=1''), --> umbral de 0.5cm
+                  0.0000001,''endcap=flat join=round quad_segs=1''
            ) as the_geom
-          FROM a_diff_b
+          FROM 
+          ( SELECT id_a, (st_dump(the_geom)).geom as the_geom FROM a_diff_b) t 
           WHERE 
           trunc(st_area(the_geom)*10000000000) > 0
+      */
       )
       SELECT 
         row_number() over() as sicob_id, 
         id_a, 
+        NULL::integer as id_b, 
+        ''' || a || ''' AS source_a,
+        ''' || b || ''' AS source_b, 
         SICOB_utmzone_wgs84(the_geom) as sicob_utm, 
         round((ST_Area(ST_Transform(the_geom, SICOB_utmzone_wgs84(the_geom)))/10000)::numeric,5) as sicob_sup,
         the_geom
@@ -168,6 +190,8 @@ IF COALESCE((_opt->>'add_sup_total')::boolean, FALSE) THEN
 END IF;
    
 RETURN _out;
+
+/** FIN!!! **/
 
 IF b <> '' THEN --> Si b no es un conjunto vacio.
     --> CREANDO LOS PARES de indices (ai,bi) DE LOS POLIGONOS QUE SE INTERSECTAN
