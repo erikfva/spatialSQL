@@ -50,6 +50,7 @@ BEGIN
 --_opt := '{"lyr_in":"processed.f20171107adgecfb25a069f4_nsi"}'::json;
 --_opt := '{"lyr_in":"processed.f20170809cfabdeg77d7b0d4_nsi","doanalisys":["ATE"],"workers":"5"}'::json;
 --_opt := '{"lyr_in":"uploads.f20190507fcdbegaaacb93d9", "debug":"TRUE"}'::json;
+--_opt := '{"lyr_in":"uploads.f20181120edfcgbacb5d8d6a", "debug":"TRUE"}'::json;
 IF COALESCE( (_opt->>'doanalisys')::text , '') <> '' THEN
 	SELECT array_agg(regexp_replace(u::text,'"','','g')) FROM
 	(
@@ -140,7 +141,7 @@ IF 'ATE' = ANY(_doanalisys) THEN
         	'a', _lyr_in,
             'condition_a', COALESCE( (_opt->>'condition')::text , 'TRUE'),
             'b', 'coberturas.ate',
-            'condition_b', 'est_der=''VIGENTE''',
+            'condition_b', 'est_der=¨VIGENTE¨',
             'subfix', '_ate',
             'schema', 'temp',
             'add_sup_total', true,
@@ -248,8 +249,8 @@ IF 'PGMF' = ANY (_doanalisys) THEN
             'b', 'coberturas.pgmf',
             'subfix', '_pgmf',
             'schema', 'temp',
-            'add_sup_total', true,
-            'filter_overlap', false
+            'add_sup_total', TRUE,
+            'filter_overlap', FALSE
         )    
 	);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se ha encontrado sobreposicion.
@@ -270,15 +271,20 @@ IF 'PGMF' = ANY (_doanalisys) THEN
                     )->>'table_out',
             'fname', 'pgmf'
         );
+        
              
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.pgmf","nombre":"Plan Gral. de Manejo Forestal  (PGMF)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
-            EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
+        sql := format('SELECT array_to_json(array_agg(q)) as detalle
             FROM (
                 SELECT ' || sicob_no_geo_column(_aux->>'lyr_over','{}','b.') || ',
                     round(cast((b.sicob_sup * 100 / a.sicob_sup) as numeric),1) as PCTJE
                 FROM %s a, %s b
                 WHERE a.sicob_id = b.id_a
-            ) q', _lyr_in, _aux->>'lyr_over') INTO detalle;
+            ) q', _lyr_in, _aux->>'lyr_over');
+        IF _debug THEN
+    		RAISE NOTICE 'sicob_analisis_sobreposicion: PGMF, ejecutndo sql -> %',sql;
+        END IF;
+        EXECUTE sql INTO detalle;
         _aux := _aux::jsonb || ('{"detalle":' || detalle || '}')::jsonb;
         _out := _out::jsonb || ('{"PGMF":' || _aux::text || '}')::jsonb;
     END IF; 
