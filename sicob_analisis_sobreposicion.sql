@@ -28,6 +28,7 @@ BEGIN
 ---------------------------
 --> lyr_in : capa para el analisis.
 --> condition (opcional): Filtro para los datos de "lyr_in". Si no se especifica, se toman todos los registros.
+-->		Se debe anteponer el prefijo "a." a los nombres de campos incluidos en la expresion de filtro.
 --> doanalisys : Array del listado de analisis a aplicar, ej. "doanalisys":["TPFP","ASL"].
 --> 	Si no se especifica se realizan todos los analisis.
 --> workers : Cantidad de procesos para trabajar en paralelo, por defecto es 1 con lo se trabaja de forma secuencial (mas lento), se recomienda de 3 a 7 para no sobrecargar.
@@ -51,6 +52,8 @@ BEGIN
 --_opt := '{"lyr_in":"processed.f20170809cfabdeg77d7b0d4_nsi","doanalisys":["ATE"],"workers":"5"}'::json;
 --_opt := '{"lyr_in":"uploads.f20190507fcdbegaaacb93d9", "debug":"TRUE"}'::json;
 --_opt := '{"lyr_in":"uploads.f20181120edfcgbacb5d8d6a", "debug":"TRUE"}'::json;
+--_opt := '{"lyr_in":"coberturas.pdm", "condition":"a.sicob_id=15711","doanalisys":["PGIBT"], "debug":"TRUE"}'::json;
+
 IF COALESCE( (_opt->>'doanalisys')::text , '') <> '' THEN
 	SELECT array_agg(regexp_replace(u::text,'"','','g')) FROM
 	(
@@ -124,7 +127,7 @@ FROM (
 WHERE r.sicob_sup_sob IS NOT NULL
 ) q';
 
-EXECUTE 'SELECT sum(sicob_sup) FROM ' || _lyr_in ||
+EXECUTE 'SELECT sum(sicob_sup) FROM ' || _lyr_in || ' a' ||
 ' WHERE TRUE ' || COALESCE( 'AND (' ||  (_opt->>'condition')::text || ')', '') INTO _superficie_in;
 
 ----------------------------------------------
@@ -877,6 +880,308 @@ IF 'APM' = ANY (_doanalisys) THEN
             ) q', _lyr_in, _aux->>'lyr_over') INTO detalle;
         _aux := _aux::jsonb || ('{"detalle":' || detalle || '}')::jsonb;
         _out := _out::jsonb || ('{"APM":' || _aux::text || '}')::jsonb; 
+    END IF;
+END IF;
+
+------------------------------------------------------
+--PLAN DE GESTION INTEGRAL DE BOSQUES Y TIERRA (PGIBT)
+------------------------------------------------------
+IF 'PGIBT' = ANY (_doanalisys) THEN
+	IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: PGIBT';
+    END IF;
+    _aux := sicob_overlap(
+    	json_build_object(
+        	'a',			_lyr_in,
+            'condition_a',	COALESCE( (_opt->>'condition')::text , 'TRUE'),
+            'b',			'coberturas.pgibt',
+            'condition_b',	'b.est_der = ''VIGENTE''',
+            'subfix',		'_pgibt',
+            'schema',		'temp',
+            'add_sup_total',TRUE,
+            'filter_overlap',FALSE 
+        )
+	);
+    IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se ha encontrado sobreposicion.
+        
+        -->Almacenando la informacion para generar shapefiles    	
+        _out_shp := _out_shp::jsonb || 
+        jsonb_build_object(
+            'lyr',_aux->>'lyr_over',
+            'fname', 'sobreposicion_pgibt'
+        ) || 
+        jsonb_build_object(
+            'lyr', sicob_executesql('
+                        SELECT DISTINCT a.* 
+                        FROM coberturas.pgibt a INNER JOIN ' || (_aux->>'lyr_over')::text || ' b 
+                        ON (a.sicob_id = b.id_b)
+                    ',
+                        ('{"table_out":"temp.pgibt_' || tbl_name || '"}')::json
+                    )->>'table_out',
+            'fname', 'pgibt'
+        );
+            
+        _aux := _aux::jsonb || ('{"lyr_b":"coberturas.pgibt","nombre":"PLAN DE GESTION INTEGRAL DE BOSQUES Y TIERRA (PGIBT)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
+            EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
+            FROM (
+                SELECT ' || sicob_no_geo_column(_aux->>'lyr_over','{}','b.') || ',
+                    round(cast((b.sicob_sup * 100 / a.sicob_sup) as numeric),1) as PCTJE
+                FROM %s a, %s b
+                WHERE a.sicob_id = b.id_a
+            ) q', _lyr_in, _aux->>'lyr_over') INTO detalle;
+        _aux := _aux::jsonb || ('{"detalle":' || detalle || '}')::jsonb;
+        _out := _out::jsonb || ('{"PGIBT":' || _aux::text || '}')::jsonb; 
+    END IF;
+END IF;
+
+------------------------------------------------------
+--PLAN DE MANEJO INTEGRAL DE BOSQUES (PMIB) 
+------------------------------------------------------
+IF 'PMIB' = ANY (_doanalisys) THEN
+	IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: PMIB';
+    END IF;
+    _aux := sicob_overlap(
+    	json_build_object(
+        	'a',			_lyr_in,
+            'condition_a',	COALESCE( (_opt->>'condition')::text , 'TRUE'),
+            'b',			'coberturas.pmib',
+            'condition_b',	'b.est_der = ''VIGENTE''',
+            'subfix',		'_pmib',
+            'schema',		'temp',
+            'add_sup_total',TRUE,
+            'filter_overlap',FALSE 
+        )
+	);
+    IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se ha encontrado sobreposicion.
+        
+        -->Almacenando la informacion para generar shapefiles    	
+        _out_shp := _out_shp::jsonb || 
+        jsonb_build_object(
+            'lyr',_aux->>'lyr_over',
+            'fname', 'sobreposicion_pmib'
+        ) || 
+        jsonb_build_object(
+            'lyr', sicob_executesql('
+                        SELECT DISTINCT a.* 
+                        FROM coberturas.pmib a INNER JOIN ' || (_aux->>'lyr_over')::text || ' b 
+                        ON (a.sicob_id = b.id_b)
+                    ',
+                        ('{"table_out":"temp.pmib_' || tbl_name || '"}')::json
+                    )->>'table_out',
+            'fname', 'pmib'
+        );
+            
+        _aux := _aux::jsonb || ('{"lyr_b":"coberturas.pmib","nombre":"PLAN DE MANEJO INTEGRAL DE BOSQUES (PMIB)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
+            EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
+            FROM (
+                SELECT ' || sicob_no_geo_column(_aux->>'lyr_over','{}','b.') || ',
+                    round(cast((b.sicob_sup * 100 / a.sicob_sup) as numeric),1) as PCTJE
+                FROM %s a, %s b
+                WHERE a.sicob_id = b.id_a
+            ) q', _lyr_in, _aux->>'lyr_over') INTO detalle;
+        _aux := _aux::jsonb || ('{"detalle":' || detalle || '}')::jsonb;
+        _out := _out::jsonb || ('{"PMIB":' || _aux::text || '}')::jsonb; 
+    END IF;
+END IF;
+
+------------------------------------------------------
+--REGISTRO DE PLANTACIONES FORESTALES (RPF) 
+------------------------------------------------------
+IF 'RPF' = ANY (_doanalisys) THEN
+	IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: RPF';
+    END IF;
+    _aux := sicob_overlap(
+    	json_build_object(
+        	'a',			_lyr_in,
+            'condition_a',	COALESCE( (_opt->>'condition')::text , 'TRUE'),
+            'b',			'coberturas.rpf',
+            'subfix',		'_rpf',
+            'schema',		'temp',
+            'add_sup_total',TRUE,
+            'filter_overlap',FALSE 
+        )
+	);
+    IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se ha encontrado sobreposicion.
+        
+        -->Almacenando la informacion para generar shapefiles    	
+        _out_shp := _out_shp::jsonb || 
+        jsonb_build_object(
+            'lyr',_aux->>'lyr_over',
+            'fname', 'sobreposicion_rpf'
+        ) || 
+        jsonb_build_object(
+            'lyr', sicob_executesql('
+                        SELECT DISTINCT a.* 
+                        FROM coberturas.rpf a INNER JOIN ' || (_aux->>'lyr_over')::text || ' b 
+                        ON (a.sicob_id = b.id_b)
+                    ',
+                        ('{"table_out":"temp.rpf_' || tbl_name || '"}')::json
+                    )->>'table_out',
+            'fname', 'rpf'
+        );
+            
+        _aux := _aux::jsonb || ('{"lyr_b":"coberturas.rpf","nombre":"REGISTRO DE PLANTACINES FORESTALES (RPF)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
+            EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
+            FROM (
+                SELECT ' || sicob_no_geo_column(_aux->>'lyr_over','{}','b.') || ',
+                    round(cast((b.sicob_sup * 100 / a.sicob_sup) as numeric),1) as PCTJE
+                FROM %s a, %s b
+                WHERE a.sicob_id = b.id_a
+            ) q', _lyr_in, _aux->>'lyr_over') INTO detalle;
+        _aux := _aux::jsonb || ('{"detalle":' || detalle || '}')::jsonb;
+        _out := _out::jsonb || ('{"RPF":' || _aux::text || '}')::jsonb; 
+    END IF;
+END IF;
+
+------------------------------------------------------
+--Plan operativo de gestion integral (POGI)
+------------------------------------------------------
+IF 'POGI' = ANY (_doanalisys) THEN
+	IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: POGI';
+    END IF;
+    _aux := sicob_overlap(
+    	json_build_object(
+        	'a',			_lyr_in,
+            'condition_a',	COALESCE( (_opt->>'condition')::text , 'TRUE'),
+            'b',			'coberturas.pogi',
+            'subfix',		'_pogi',
+            'schema',		'temp',
+            'add_sup_total',TRUE,
+            'filter_overlap',FALSE 
+        )
+	);
+    IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se ha encontrado sobreposicion.
+        
+        -->Almacenando la informacion para generar shapefiles    	
+        _out_shp := _out_shp::jsonb || 
+        jsonb_build_object(
+            'lyr',_aux->>'lyr_over',
+            'fname', 'sobreposicion_pogi'
+        ) || 
+        jsonb_build_object(
+            'lyr', sicob_executesql('
+                        SELECT DISTINCT a.* 
+                        FROM coberturas.pogi a INNER JOIN ' || (_aux->>'lyr_over')::text || ' b 
+                        ON (a.sicob_id = b.id_b)
+                    ',
+                        ('{"table_out":"temp.pogi_' || tbl_name || '"}')::json
+                    )->>'table_out',
+            'fname', 'pogi'
+        );
+            
+        _aux := _aux::jsonb || ('{"lyr_b":"coberturas.pogi","nombre":"PLAN OPERATIVO DE GESION INTEGRAL (POGI)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
+            EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
+            FROM (
+                SELECT ' || sicob_no_geo_column(_aux->>'lyr_over','{}','b.') || ',
+                    round(cast((b.sicob_sup * 100 / a.sicob_sup) as numeric),1) as PCTJE
+                FROM %s a, %s b
+                WHERE a.sicob_id = b.id_a
+            ) q', _lyr_in, _aux->>'lyr_over') INTO detalle;
+        _aux := _aux::jsonb || ('{"detalle":' || detalle || '}')::jsonb;
+        _out := _out::jsonb || ('{"POGI":' || _aux::text || '}')::jsonb; 
+    END IF;
+END IF;
+
+------------------------------------------------------
+--SERVIDUMBRES ECOLOGICAS (SEL)
+------------------------------------------------------
+IF 'SEL' = ANY (_doanalisys) THEN
+	IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: SEL';
+    END IF;
+    _aux := sicob_overlap(
+    	json_build_object(
+        	'a',			_lyr_in,
+            'condition_a',	COALESCE( (_opt->>'condition')::text , 'TRUE'),
+            'b',			'coberturas.sel',
+            'subfix',		'_sel',
+            'schema',		'temp',
+            'add_sup_total',TRUE,
+            'filter_overlap',FALSE 
+        )
+	);
+    IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se ha encontrado sobreposicion.
+        
+        -->Almacenando la informacion para generar shapefiles    	
+        _out_shp := _out_shp::jsonb || 
+        jsonb_build_object(
+            'lyr',_aux->>'lyr_over',
+            'fname', 'sobreposicion_sel'
+        ) || 
+        jsonb_build_object(
+            'lyr', sicob_executesql('
+                        SELECT DISTINCT a.* 
+                        FROM coberturas.sel a INNER JOIN ' || (_aux->>'lyr_over')::text || ' b 
+                        ON (a.sicob_id = b.id_b)
+                    ',
+                        ('{"table_out":"temp.sel_' || tbl_name || '"}')::json
+                    )->>'table_out',
+            'fname', 'sel'
+        );
+            
+        _aux := _aux::jsonb || ('{"lyr_b":"coberturas.sel","nombre":"SERVIDUMBRES ECOLOGICAS (SEL)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
+            EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
+            FROM (
+                SELECT ' || sicob_no_geo_column(_aux->>'lyr_over','{}','b.') || ',
+                    round(cast((b.sicob_sup * 100 / a.sicob_sup) as numeric),1) as PCTJE
+                FROM %s a, %s b
+                WHERE a.sicob_id = b.id_a
+            ) q', _lyr_in, _aux->>'lyr_over') INTO detalle;
+        _aux := _aux::jsonb || ('{"detalle":' || detalle || '}')::jsonb;
+        _out := _out::jsonb || ('{"SEL":' || _aux::text || '}')::jsonb; 
+    END IF;
+END IF;
+
+------------------------------------------------------
+--SITIOS RAMSAR (RAMSAR)
+------------------------------------------------------
+IF 'RAMSAR' = ANY (_doanalisys) THEN
+	IF _debug THEN
+    	RAISE NOTICE 'sicob_analisis_sobreposicion: RAMSAR';
+    END IF;
+    _aux := sicob_overlap(
+    	json_build_object(
+        	'a',			_lyr_in,
+            'condition_a',	COALESCE( (_opt->>'condition')::text , 'TRUE'),
+            'b',			'coberturas.ramsar',
+            'subfix',		'_ramsar',
+            'schema',		'temp',
+            'add_sup_total',TRUE,
+            'filter_overlap',FALSE 
+        )
+	);
+    IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se ha encontrado sobreposicion.
+        
+        -->Almacenando la informacion para generar shapefiles    	
+        _out_shp := _out_shp::jsonb || 
+        jsonb_build_object(
+            'lyr',_aux->>'lyr_over',
+            'fname', 'sobreposicion_ramsar'
+        ) || 
+        jsonb_build_object(
+            'lyr', sicob_executesql('
+                        SELECT DISTINCT a.* 
+                        FROM coberturas.ramsar a INNER JOIN ' || (_aux->>'lyr_over')::text || ' b 
+                        ON (a.sicob_id = b.id_b)
+                    ',
+                        ('{"table_out":"temp.ramsar_' || tbl_name || '"}')::json
+                    )->>'table_out',
+            'fname', 'ramsar'
+        );
+            
+        _aux := _aux::jsonb || ('{"lyr_b":"coberturas.ramsar","nombre":"SITIOS RAMSAR (RAMSAR)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
+            EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
+            FROM (
+                SELECT ' || sicob_no_geo_column(_aux->>'lyr_over','{}','b.') || ',
+                    round(cast((b.sicob_sup * 100 / a.sicob_sup) as numeric),1) as PCTJE
+                FROM %s a, %s b
+                WHERE a.sicob_id = b.id_a
+            ) q', _lyr_in, _aux->>'lyr_over') INTO detalle;
+        _aux := _aux::jsonb || ('{"detalle":' || detalle || '}')::jsonb;
+        _out := _out::jsonb || ('{"RAMSAR":' || _aux::text || '}')::jsonb; 
     END IF;
 END IF;
 
