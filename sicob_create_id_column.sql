@@ -193,17 +193,17 @@ BEGIN
   LOOP --{
     had_column := FALSE;
     BEGIN     
-      sql := Format('ALTER TABLE %s ADD %s SERIAL NOT NULL UNIQUE', reloid::text, sicob_id_name);
+      sql := Format('ALTER TABLE %s ADD COLUMN %s SERIAL', reloid::text, sicob_id_name);
       RAISE DEBUG 'Running %', sql;
       EXECUTE sql;
-         
+    
       EXIT sicob_id_setup;
       EXCEPTION
       WHEN duplicate_column THEN
         RAISE NOTICE 'Column sicob_id already exists';
         had_column := TRUE;
       WHEN others THEN
-      	IF SQLSTATE = 42701 THEN
+      	IF SQLSTATE::text = '42701' THEN
         	RAISE NOTICE 'Column sicob_id already exists';
         	had_column := TRUE;
         ELSE
