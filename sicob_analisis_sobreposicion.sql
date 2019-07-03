@@ -14,7 +14,7 @@ DECLARE
   _superficie_in float;
   sql text;
   detalle json;
- _doanalisys text[] DEFAULT ARRAY['ATE', 'ASL', 'PGMF', 'POAF', 'POP', 'PDM', 'RF', 'RPPN', 'TPFP', 'PLUS', 'D337', 'DPAS', 'APN', 'APD', 'APM'];
+ _doanalisys text[] DEFAULT ARRAY['ATE', 'ASL', 'PGMF', 'POAF', 'POP', 'PDM', 'RF', 'RPPN', 'TPFP', 'PLUS', 'D337', 'DPAS', 'APN', 'APD', 'APM', 'PGIBT', 'PMIB', 'RPF', 'POGI', 'SEL', 'RAMSAR'];
 	listSQL TEXT[];
     analisys text;
     tbl_name text;
