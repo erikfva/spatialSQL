@@ -78,7 +78,7 @@ IF b <> '' THEN
     from 
       ' || a || ' a 
       INNER JOIN ' || b || ' b
-      ON (st_intersects(a.the_geom, b.the_geom) AND NOT ST_Touches(a.the_geom, b.the_geom))';
+      ON (' || _condition_a || ' AND ' || _condition_b || ' AND st_intersects(a.the_geom, b.the_geom) AND NOT ST_Touches(a.the_geom, b.the_geom))';
 	_out := sicob_executesql( 
             	sql,
             	json_build_object(
