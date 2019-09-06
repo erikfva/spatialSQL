@@ -56,7 +56,7 @@ BEGIN
 --_opt := '{"lyr_in":"processed.f20170928daecbfg7768f8ae_nsi","min_sup":"0","tolerance":"0"}';
 --_opt := '{"lyr_in":"processed.f20171005fgcbdae84fb9ea1_nsi"}';
 --_opt := '{"lyr_in":"uploads.f20190515fgdcbead21d39cd"}';
---_opt := '{"lyr_in":"uploads.f20190718cdagebfc5b575fe", "lyr_parc":"processed.f20190718abfgedc603b800f_fixt", "fldpredio_parc":"nombre", "fldpropietario_parc":"nombre" }';
+--_opt := '{"lyr_in":"processed.f20190724dfcageb5181a581_fixt", "lyr_parc":"processed.f20190724efagbdcba722cc2_fixt", "fldpredio_parc":"id", "fldpropietario_parc":"id" }';
 
 
 _tolerance := COALESCE((_opt->>'tolerance')::text, '0'); --> 5.3
@@ -232,6 +232,25 @@ FOR lyr_predio IN SELECT * FROM json_array_elements(lyrs_predio) LOOP
                 createdResult := TRUE;
         	END IF;
           
+            --> Actualizando la superficie del predio en caso de indicar una cobertura de predio/parcela
+            IF (lyr_predio->>'subfix')::text = '_parc' THEN
+                EXECUTE format('
+                    UPDATE
+                        %s a
+                    SET
+                        sup_predio = (	
+                            SELECT 
+                              b.sicob_sup
+                            FROM
+                              %s b
+                            WHERE
+                                b.sicob_id = a.id_b
+                            LIMIT 1
+                        )
+                ', (tbl_name || _subfix || '_ppred') ,(lyr_predio->'lyr_parc'->>'source')::text );
+            END IF;
+            
+            
             IF COALESCE( (_out->>'features_diff_cnt')::int,0) > 0 THEN --> si existen poligonos NO encontrados.
             	a := (_out->>'lyr_over')::text;
                 _condition := 'a.id_b IS NULL';
