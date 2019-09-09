@@ -161,6 +161,29 @@ IF sql = '' THEN
     ';
 END IF;
 
+IF COALESCE((_opt->>'join_columns')::boolean, FALSE) THEN
+	__a := tbl_nameA || '__diff';
+    EXECUTE 'DROP TABLE IF EXISTS ' || __a;
+    EXECUTE 'CREATE TEMPORARY TABLE ' || __a || ' ON COMMIT DROP AS ' || sql;
+    sql := '
+        SELECT
+            diff.sicob_id,' || 
+            sicob_no_geo_column(
+                a,
+                '{sicob_id,sicob_utm,sicob_sup, topogeom}',
+                'a.'
+            ) || ', diff.sicob_sup, diff.sicob_utm, diff.the_geom
+        FROM
+        ' || a || ' a
+        INNER JOIN 
+        ' || __a || ' diff
+        ON (
+         a.sicob_id = diff.id_a
+        )
+    ';
+END IF;
+
+
 __a := tbl_nameA || _subfixresult;
 IF COALESCE((_opt->>'temp')::boolean, FALSE) THEN
     EXECUTE 'DROP TABLE IF EXISTS ' || __a;
@@ -188,227 +211,10 @@ IF COALESCE((_opt->>'add_sup_total')::boolean, FALSE) THEN
     END IF;
     _out := _out::jsonb || jsonb_build_object('diff_sup',sicob_sup_total);
 END IF;
-   
+  
 RETURN _out;
 
 /** FIN!!! **/
-
-IF b <> '' THEN --> Si b no es un conjunto vacio.
-    --> CREANDO LOS PARES de indices (ai,bi) DE LOS POLIGONOS QUE SE INTERSECTAN
-    a__b := 'a__b';
-
-    sql := '
-    SELECT DISTINCT a.sicob_id as id_a, b.sicob_id as id_b
-    FROM 
-    ' || b::text || ' b INNER JOIN ' || a::text || ' a
-    ON (
-        ' || _condition_a || ' AND ' || _condition_b || ' AND st_intersects(a.the_geom, b.the_geom) AND NOT ST_Touches(a.the_geom, b.the_geom)
-    )';
-
-    RAISE DEBUG 'Running %', sql;
-    EXECUTE 'DROP TABLE IF EXISTS ' || a__b;
-    EXECUTE 'CREATE TEMPORARY TABLE ' || a__b || ' ON COMMIT DROP AS ' || sql;
-
-    GET DIAGNOSTICS row_cnt = ROW_COUNT; -->obteniendo la cantidad de intersecciones.	
-    IF row_cnt > 0 THEN
-        sql := 'DROP INDEX IF EXISTS ' || a__b || '_a; DROP INDEX IF EXISTS ' || a__b || '_b;';
-        RAISE DEBUG 'Running %', sql;
-        EXECUTE sql;
-                    
-        sql := 'CREATE INDEX ' || a__b || '_a
-                ON ' || a__b || ' 
-                USING btree (id_a); 
-                CREATE INDEX ' || a__b || '_b
-                ON ' || a__b || ' 
-                USING btree (id_b);';
-        RAISE DEBUG 'Running %', sql;
-        EXECUTE sql; 
-    END IF;
-END IF;
-
-    IF row_cnt = 0 THEN
-    --> No existe interseccion. Retornar todos los poligonos de "a".
-        sql := '
-        SELECT 
-        	a.sicob_id, a.sicob_id as id_a,' || 
-            CASE WHEN COALESCE((_opt->>'add_sup_total')::boolean, FALSE)
-            	OR COALESCE((_opt->>'add_geoinfo')::boolean, FALSE)  
-                OR COALESCE((_opt->>'min_sup')::real, 0) > 0 THEN
-                'SICOB_utmzone_wgs84(the_geom) as sicob_utm,
-                st_area(ST_Transform(the_geom, SICOB_utmzone_wgs84(the_geom) ))/10000 as sicob_sup,' 
-            ELSE 
-                '' 
-            END || ' 
-        	a.the_geom 
-		FROM ' || a || ' a WHERE ' || _condition_a;
-	ELSE
-        -----------------------------------------
-        --CALCULANDO LA DIFERENCIA DE a CON b 
-        -----------------------------------------
-           
-        sql := '
-        	SELECT DISTINCT inters.id_a as sicob_id, a.the_geom
-            FROM ' || a__b || ' inters 
-            INNER JOIN ' || a::text || ' a ON (a.sicob_id = inters.id_a)
-            INNER JOIN ' || b::text || ' b ON (b.sicob_id = inters.id_b)
-            WHERE (ST_CoveredBy(a.the_geom,b.the_geom) = TRUE )';
-            
-        EXECUTE 'DROP TABLE IF EXISTS ' || tbl_nameA || '_fullcovered';
-        EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_nameA || '_fullcovered ON COMMIT DROP AS ' || sql;
-  
-        sql := '
-              SELECT DISTINCT inters.id_a as sicob_id,
-              (SELECT the_geom FROM ' || a::text || ' a WHERE a.sicob_id = inters.id_a) as the_geom,
-              (SELECT ST_Collect(b.the_geom) FROM ' || a__b || ' a__b INNER JOIN ' || b::text || ' b ON(a__b.id_a = inters.id_a AND b.sicob_id = a__b.id_b) ) as target
-              FROM ' || a__b || ' inters
-              WHERE NOT EXISTS (SELECT sicob_id FROM ' || tbl_nameA || '_fullcovered t WHERE t.sicob_id = inters.id_a) 
-              ';
-        EXECUTE 'DROP TABLE IF EXISTS ' || tbl_nameA || '_partialcovered';
-        EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_nameA || '_partialcovered ON COMMIT DROP AS ' || sql; 
-        
-       -- EXECUTE 'DROP TABLE IF EXISTS temp.' || tbl_nameA || '_partialcovered';
-       -- EXECUTE 'CREATE TABLE temp.' || tbl_nameA || '_partialcovered AS ' || sql;       
-         
-        sql := '
-            SELECT 
-                sicob_id as id_a, 
-                sicob_difference(the_geom,target,''POLYGON'')
-                --st_difference(the_geom,st_makevalid(  st_collectionextract( target, 3) ))
-                AS the_geom
-            FROM ' || tbl_nameA || '_partialcovered a
-              ';             
-       EXECUTE 'DROP TABLE IF EXISTS ' || tbl_nameA || '_difference'; 
-       EXECUTE 'CREATE TEMPORARY TABLE ' || tbl_nameA || '_difference ON COMMIT DROP AS ' || sql; 
-   
-        sql := '
-        WITH
-        a_difference_b AS (       
-            SELECT row_number() over() AS ___o, t.* 
-            FROM 
-            (
-                SELECT sicob_id as id_a,the_geom 
-                FROM ' || a::text || ' a 
-                WHERE ' || _condition_a || ' AND NOT EXISTS (SELECT sicob_id FROM ' || a__b || ' a__b WHERE a__b.id_a = a.sicob_id)
-                UNION ALL
-                SELECT id_a, (st_dump(the_geom)).geom as the_geom FROM ' || tbl_nameA || '_difference
-            )
-            t ORDER BY t.id_a    
-        ),
-        overlayed AS (
-            --filtrando los polignos que se sobreponenen en la misma capa
-                SELECT 
-                CASE WHEN st_area(b1.the_geom) < st_area(b2.the_geom) THEN
-                    b1.___o
-                ELSE
-                    b2.___o
-                END as ___o
-                FROM
-                    a_difference_b b1,
-                    a_difference_b b2
-                WHERE 
-                    ' || COALESCE((_opt->>'filter_overlap')::text, 'TRUE') || ' AND
-                    b1.___o <> b2.___o and
-                    b1.___o < b2.___o and
-                    ST_Intersects(b1.the_geom,b2.the_geom) 
-                    AND NOT ST_Touches(b1.the_geom, b2.the_geom)
-        ),
-        _fixsliver AS (
-        	SELECT id_a,
-            sicob_spikeremover(
-            sicob_sliverremover(the_geom)
-            , 0.01) 
-            	 AS the_geom
-               	--sicob_spikeremover(the_geom, 0.0000001) AS the_geom
-                --sicob_spikeremover1(the_geom, 0.00001) AS the_geom
-			FROM a_difference_b diff
-            WHERE 
-            	NOT EXISTS (SELECT ___o FROM overlayed ov WHERE ov.___o = diff.___o) 
-                AND
-            	trunc(st_area(the_geom)*10000000000) > 0              
-        ),
-        _results AS (
-            SELECT id_a, the_geom' || 
-            CASE WHEN COALESCE((_opt->>'add_sup_total')::boolean, FALSE)
-            	OR COALESCE((_opt->>'add_geoinfo')::boolean, FALSE)  
-                OR COALESCE((_opt->>'min_sup')::real, 0) > 0 THEN 
-                ', ST_Transform(the_geom, SICOB_utmzone_wgs84(the_geom) ) as the_geomutm,
-                SICOB_utmzone_wgs84(the_geom) as sicob_utm ' 
-            ELSE 
-                '' 
-            END || '
-            FROM _fixsliver                            	
-        )
-        SELECT 
-        	row_number() over() AS sicob_id,
-            id_a, the_geom' || 
-            CASE WHEN COALESCE((_opt->>'add_sup_total')::boolean, FALSE)
-            	OR COALESCE((_opt->>'add_geoinfo')::boolean, FALSE)  
-                OR COALESCE((_opt->>'min_sup')::real, 0) > 0 THEN 
-                ', the_geomutm, sicob_utm, st_area(the_geomutm)/10000 as sicob_sup' 
-            ELSE 
-                '' 
-            END || '
-        FROM
-        	_results'
-        || 
-        CASE WHEN COALESCE((_opt->>'min_sup')::real, 0) > 0 THEN 
-        	' WHERE st_area(the_geomutm)/1000 >= ' || (_opt->>'min_sup')::text
-        ELSE 
-        	'' 
-        END ||
-        ' ORDER BY id_a';       
-  
-        RAISE DEBUG 'Running %', sql;  
-    END IF; 
-   
-    IF sql = '' THEN
-    	--> Si no se genero una nueva cobertura devuelve la misma de entrada.
-        EXECUTE 'SELECT count(*) FROM ' || a INTO row_cnt;
-    	RETURN ('{"lyr_difference":"' || a || '","features_diff_cnt":"' || row_cnt || '"}')::json;
-    END IF;
-    
-    __a := tbl_nameA || _subfixresult;
-	IF COALESCE((_opt->>'temp')::boolean, FALSE) THEN
-    	EXECUTE 'DROP TABLE IF EXISTS ' || __a;
-    	EXECUTE 'CREATE TEMPORARY TABLE ' || __a || ' ON COMMIT DROP AS ' || sql;
-    ELSE
-    	__a := _schema || '.' || __a;
-        EXECUTE 'DROP TABLE IF EXISTS ' || __a;
-    	EXECUTE 'CREATE UNLOGGED TABLE ' || __a || ' AS ' || sql;
-    END IF;
-    GET DIAGNOSTICS row_cnt = ROW_COUNT; -->obteniendo la cantidad de registros creados.
-    
-    EXECUTE 'ALTER TABLE ' || __a || ' ADD PRIMARY KEY (sicob_id);';
-    /*
-    sql := 'DROP INDEX IF EXISTS ' || tbl_nameA || _subfixresult || '_geomidx';
-    RAISE DEBUG 'Running %', sql;
-    EXECUTE sql;
-            
-    sql := 'CREATE INDEX ' || tbl_nameA || _subfixresult || '_geomidx
-    ON ' || __a || ' 
-    USING GIST (the_geom) ';
-    RAISE DEBUG 'Running %', sql;
-    EXECUTE sql;    
-    */
-
- 	_out := ('{"lyr_difference":"' || __a || '","features_diff_cnt":"' || row_cnt || '"}')::json;
-
-    --CALCULANDO LA SUPERFICIE TOTAL RESULTANTE en HA.
-    IF COALESCE((_opt->>'add_sup_total')::boolean, FALSE) THEN
-    	IF row_cnt > 0 THEN
-        	sql := '
-            	SELECT sum(sicob_sup) as sicob_sup FROM ' || 
-                sicob_fix_si(__a)
-                || '
-            ';
-            EXECUTE sql INTO sicob_sup_total;
-        ELSE
-        	sicob_sup_total := 0;
-        END IF;
-        _out := _out::jsonb || jsonb_build_object('diff_sup',sicob_sup_total);
-    END IF;
-   
-    RETURN _out;
 
 
 EXCEPTION
