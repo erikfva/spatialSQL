@@ -4,24 +4,7 @@ CREATE OR REPLACE FUNCTION public.sicob_difference(_opt json)
  LANGUAGE plpgsql
 AS $function$
 DECLARE 
-  a TEXT;
-  b TEXT;
-  _condition_a text; _condition_b text;
-  _subfixresult text;
-  _schema text;
-  _tolerance double precision;
-
----------------------------------
-  
- sql text;
-
- tbl_nameA text; sch_nameA text;
- tbl_nameB text; sch_nameB text;
- 
- row_cnt integer;
- __a text; __b text; a__b text;
  _out json := '{}';
- sicob_sup_total real := 0;
  -------------------------------
 
 BEGIN
@@ -44,7 +27,7 @@ BEGIN
 --> add_sup_total (opcional true/false): Calcula y devuelve la superficie total sobrepuesta en hectareas.
 --> min_sup (opcional): Superficie minima (en hectareas) permitida para los poligonos de la capa resultado.
 --> add_geoinfo (opcional true/false): Agrega o no la informaciï¿½n del cï¿½digo de proyecciï¿½n UTM 'sicob_utm', superficie (ha) y 'sicob_sup' para cada polï¿½gono.
-
+--> add_fields (opcional true/false): Agrega los campos de "a" en el resultado.
 ---------------------------
 --VALORES DEVUELTOS
 ---------------------------
@@ -52,165 +35,206 @@ BEGIN
 
 --_opt := '{"a":"temp.f20170718fagebdcf580ac83_nsi_tit_tioc_adjust","b":"","subfix":"_diff", "schema":"temp"}';
 --_opt := '{"a":"uploads.f20190507gfcdeba00508ed1","b":"coberturas.predios_pop","subfix":"_diff", "schema":"temp"}';
+/*
+_opt :=    json_build_object(
+     	'a', 'coberturas.pdm',
+        'condition_a', 'a.sicob_id=15711',
+        'b', 'coberturas.plus',
+        'add_sup_total', TRUE,
+        'add_diff', TRUE,
+        'filter_overlap', FALSE,
+        'min_sup', 1
+    );
+*/
 
-a := (_opt->>'a')::TEXT;
-_condition_a := COALESCE((_opt->>'condition_a')::text, 'TRUE');
-
-b := COALESCE((_opt->>'b')::TEXT, '');
-_condition_b := COALESCE((_opt->>'condition_b')::text, 'TRUE');
-
-_subfixresult := COALESCE(_opt->>'subfix','') || '_diff'; 
-_schema := COALESCE(_opt->>'schema','temp');
-
-
-SELECT * FROM sicob_split_table_name(a::text) INTO sch_nameA, tbl_nameA;
-SELECT * FROM sicob_split_table_name(b::text) INTO sch_nameB, tbl_nameB;
-
-row_cnt := 0;
-sql := '';
-
-IF b <> '' THEN
-	sql := '      
-    select  
-    	distinct b.sicob_id as id_b, 
-        ''' || a || ''' AS source_a, 
-        ''' || b || ''' AS source_b, b.the_geom
-    from 
-      ' || a || ' a 
-      INNER JOIN ' || b || ' b
-      ON (' || _condition_a || ' AND ' || _condition_b || ' AND st_intersects(a.the_geom, b.the_geom) AND NOT ST_Touches(a.the_geom, b.the_geom))';
-	_out := sicob_executesql( 
-            	sql,
-            	json_build_object(
-                      'table_out', a || '_i_b',
-                      'temp', true,
-                      'create_index', true
-                )
-			);
-    sql := '';
-END IF;
-
---> Caso: Si B es conjunto vacio o no existe interseccion de A con B
---	se debe devolver a
-IF b = '' or COALESCE((_out->>'row_cnt')::integer, 1) = 0 THEN --> Si b es un conjunto vacio.   
-    --> No existe interseccion. Retornar todos los poligonos de "a".
-        sql := '
-        SELECT 
-        	a.sicob_id, a.sicob_id as id_a,
-            ''' || a || ''' AS source_a,
-            ''' || b || ''' AS source_b,
-            SICOB_utmzone_wgs84(the_geom) as sicob_utm,
-            st_area(ST_Transform(the_geom, SICOB_utmzone_wgs84(the_geom) ))/10000 as sicob_sup,
-        	a.the_geom 
-		FROM ' || a || ' a WHERE ' || _condition_a;
-END IF;
-
-IF sql = '' THEN
-    sql := '
-      WITH 
-      b_inter_a_diss AS (
-          SELECT st_union(the_geom) as the_geom 
-          FROM ' || (_out->>'table_out')::text || '
-      ),
-      a_diff_b AS (
-          SELECT 
-              a.sicob_id as id_a, st_difference(a.the_geom, ( SELECT the_geom FROM b_inter_a_diss limit 1) ) as the_geom
-          FROM 
-          ' || a || ' a
-      ),
-      a_diff_b_fixsliver AS (
-          SELECT *
-          FROM
-          ( SELECT id_a, (st_dump(the_geom)).geom as the_geom FROM a_diff_b) t 
-          WHERE 
-            trunc(
-              st_area(
-                  st_buffer( 
-                    st_buffer( the_geom ,-0.000001,''endcap=flat join=round quad_segs=1''), --> umbral de 0.5cm
-                    0.000001,''endcap=flat join=round quad_segs=1''
-                  )
-              )*10000000000
-            ) > 0
-      /*
-          SELECT 
-          id_a,
-            st_buffer( 
-                  st_buffer( the_geom ,-0.0000001,''endcap=flat join=round quad_segs=1''), --> umbral de 0.5cm
-                  0.0000001,''endcap=flat join=round quad_segs=1''
-           ) as the_geom
-          FROM 
-          ( SELECT id_a, (st_dump(the_geom)).geom as the_geom FROM a_diff_b) t 
-          WHERE 
-          trunc(st_area(the_geom)*10000000000) > 0
-      */
+WITH
+_params AS (
+SELECT 
+    COALESCE((opt->>'a')::text,'') as a,
+    (sicob_split_table_name((opt->>'a')::text)).table_name as tbl_a,
+    COALESCE((opt->>'condition_a')::text,'TRUE') as condition_a,
+    COALESCE((opt->>'b')::text,'') as b,
+    COALESCE((opt->>'condition_b')::text,'TRUE') as condition_b,
+    (sicob_split_table_name((opt->>'b')::text)).table_name as tbl_b,
+    COALESCE((opt->>'temp')::boolean,FALSE) as _temp,
+    COALESCE((opt->>'subfix')::text,'_diff') as subfix,
+    COALESCE((opt->>'schema')::text,'temp') as _schema,
+    COALESCE((opt->>'add_geoinfo')::boolean,FALSE) as add_geoinfo,
+    COALESCE((opt->>'add_fields')::boolean,FALSE) as add_fields,
+    COALESCE((opt->>'min_sup')::real,0::real) as min_sup,
+    COALESCE((opt->>'add_sup_total')::boolean,FALSE) as add_sup_total,
+    COALESCE((opt->>'filter_overlap')::boolean,TRUE) as filter_overlap
+ FROM (
+ 	SELECT 
+    -- USAR PARA PRUEBAS
+    /*
+    json_build_object(
+     	'a', 'coberturas.pdm',
+        'condition_a', 'a.sicob_id=15711',
+        'b', 'coberturas.plus',
+        'add_sup_total', TRUE,
+        'add_diff', TRUE,
+        'filter_overlap', FALSE,
+        'min_sup', 1
+    )
+    */
+    _opt 
+    as opt
+ ) params
+),
+b_inter_a AS (
+	SELECT
+    sicob_intersection(
+    	json_build_object(
+          'a', a,
+          'condition_a',condition_a,
+          'b',b,
+          'condition_b',condition_b,
+          'temp', true,
+          'add_sup', false     
+        )
+    ) as res
+    FROM
+    _params 
+),
+b_inter_a_diss AS (
+	SELECT 
+    sicob_executesql('
+      SELECT st_union(the_geom) as the_geom 
+      FROM ' || (b_inter_a.res->>'lyr_intersected'),
+      json_build_object(
+        'table_out', 't' || MD5(random()::text),
+        'temp', true,
+        'create_index', true
       )
+    ) AS res_inter
+    FROM
+    _params, b_inter_a
+),
+a_diff_b AS (
+  SELECT 
+  sicob_executesql('
+  	SELECT * FROM (
+      SELECT
+          a.sicob_id as id_a, 
+          st_difference(a.the_geom, ( SELECT the_geom FROM ' || (SELECT res_inter->>'table_out' FROM b_inter_a_diss) || ' limit 1) ) as the_geom
+      FROM 
+      ( 
+        SELECT 
+        sicob_id, (st_dump(the_geom)).geom as the_geom
+        FROM ' || a || ' a
+        WHERE
+      	' || condition_a || '
+      ) a     
+    )t
+    WHERE
+    ST_IsEmpty(t.the_geom) = FALSE',
+    json_build_object(
+        'table_out', 't' || MD5(random()::text),
+        'temp', true,
+        'create_index', true
+    )
+  ) as res
+  FROM
+  _params
+),
+a_diff_b_fixsliver AS (
+	SELECT
+    sicob_executesql('
       SELECT 
         row_number() over() as sicob_id, 
         id_a, 
-        NULL::integer as id_b, 
+        CAST(NULL AS integer) as id_b, 
         ''' || a || ''' AS source_a,
         ''' || b || ''' AS source_b, 
         SICOB_utmzone_wgs84(the_geom) as sicob_utm, 
         round((ST_Area(ST_Transform(the_geom, SICOB_utmzone_wgs84(the_geom)))/10000)::numeric,5) as sicob_sup,
         the_geom
-      FROM 
-        a_diff_b_fixsliver
+      FROM (
+        SELECT 
+        *
+        FROM ( 
+        	SELECT 
+            id_a, (st_dump(the_geom)).geom as the_geom 
+            FROM ' || (SELECT res->>'table_out' FROM a_diff_b) || '
+        ) t 
+        WHERE 
+          trunc(
+            st_area(
+                st_buffer( 
+                  st_buffer( the_geom ,-0.000001,''endcap=flat join=round quad_segs=1''), --> umbral de 0.5cm
+                  0.000001,''endcap=flat join=round quad_segs=1''
+                )
+            )*10000000000
+          ) > 0        
+      ) t
       WHERE 
-        ST_IsEmpty(the_geom) = FALSE
-      ORDER BY id_a
-    ';
-END IF;
-
-IF COALESCE((_opt->>'join_columns')::boolean, FALSE) THEN
-	__a := tbl_nameA || '__diff';
-    EXECUTE 'DROP TABLE IF EXISTS ' || __a;
-    EXECUTE 'CREATE TEMPORARY TABLE ' || __a || ' ON COMMIT DROP AS ' || sql;
-    sql := '
-        SELECT
-            diff.sicob_id,' || 
-            sicob_no_geo_column(
-                a,
-                '{sicob_id,sicob_utm,sicob_sup, topogeom}',
-                'a.'
-            ) || ', diff.sicob_sup, diff.sicob_utm, diff.the_geom
-        FROM
-        ' || a || ' a
-        INNER JOIN 
-        ' || __a || ' diff
-        ON (
-         a.sicob_id = diff.id_a
-        )
-    ';
-END IF;
-
-
-__a := tbl_nameA || _subfixresult;
-IF COALESCE((_opt->>'temp')::boolean, FALSE) THEN
-    EXECUTE 'DROP TABLE IF EXISTS ' || __a;
-    EXECUTE 'CREATE TEMPORARY TABLE ' || __a || ' ON COMMIT DROP AS ' || sql;
-ELSE
-    __a := _schema || '.' || __a;
-    EXECUTE 'DROP TABLE IF EXISTS ' || __a;
-    EXECUTE 'CREATE UNLOGGED TABLE ' || __a || ' AS ' || sql;
-END IF;
-GET DIAGNOSTICS row_cnt = ROW_COUNT; -->obteniendo la cantidad de registros creados.
-EXECUTE 'ALTER TABLE ' || __a || ' ADD PRIMARY KEY (sicob_id);';
-
-_out := ('{"lyr_difference":"' || __a || '","features_diff_cnt":"' || row_cnt || '"}')::json;
-
---CALCULANDO LA SUPERFICIE TOTAL RESULTANTE en HA.
-IF COALESCE((_opt->>'add_sup_total')::boolean, FALSE) THEN
-    IF row_cnt > 0 THEN
-        sql := '
-            SELECT 
-            sum(st_area(ST_Transform(the_geom, SICOB_utmzone_wgs84(the_geom) ))/10000) as sicob_sup
-            FROM ' || __a;
-        EXECUTE sql INTO sicob_sup_total;
+        ST_IsEmpty(t.the_geom) = FALSE
+      ORDER BY t.id_a    
+      ',
+      json_build_object(
+          'table_out', CASE WHEN _temp THEN 't' || MD5(random()::text) ELSE _schema || '.' || tbl_a || subfix || '_fixsliver' END,
+          'temp', _temp,
+          'create_index', true
+      )
+    ) as res
+    FROM
+    _params
+),
+a_diff_b_fields AS (
+  SELECT
+  sicob_executesql('
+  	SELECT
+      diff.sicob_id,' || 
+      sicob_no_geo_column(
+          a,
+          '{id_a,id_b,sicob_id,sicob_utm,sicob_sup, topogeom}',
+          'a.'
+        ) || ', diff.sicob_sup, diff.sicob_utm, diff.the_geom
+    FROM
+    ' || a || ' a
+    INNER JOIN 
+    ' || (a_diff_b_fixsliver.res->>'table_out') || ' diff
+    ON (
+     a.sicob_id = diff.id_a
+  	)',
+    json_build_object(
+      'table_out', CASE WHEN _temp THEN 't' || MD5(random()::text) ELSE _schema || '.' || tbl_a || subfix || '_fields' END,
+      'temp', _temp,
+      'create_index', true
+    ) 
+  ) as res
+  FROM
+  _params, a_diff_b_fixsliver
+),
+result AS (
+  SELECT
+	CASE WHEN add_fields THEN
+    	(SELECT res->>'table_out' FROM a_diff_b_fields)
     ELSE
-        sicob_sup_total := 0;
-    END IF;
-    _out := _out::jsonb || jsonb_build_object('diff_sup',sicob_sup_total);
-END IF;
+    	(SELECT res->>'table_out' FROM a_diff_b_fixsliver)
+    END as lyr_difference,
+    (SELECT res->>'row_cnt' FROM a_diff_b_fixsliver) as features_diff_cnt,
+	CASE WHEN add_sup_total THEN
+    	
+        sicob_executesql('
+          SELECT
+              sum(sicob_sup) as sup
+          FROM ' ||
+          (SELECT res->>'table_out' FROM a_diff_b_fixsliver),
+          json_build_object(
+          	'return_scalar', true
+          )
+    	)->>'sup'
+        
+    ELSE
+    	null
+    END as diff_sup
+  FROM _params
+)
+SELECT json_strip_nulls(row_to_json(t)) FROM result t INTO _out;
+--SELECT * FROM a_diff_b_fixsliver
+
   
 RETURN _out;
 
@@ -219,7 +243,7 @@ RETURN _out;
 
 EXCEPTION
 WHEN others THEN
-            RAISE EXCEPTION 'geoSICOB (sicob_difference) % , % , _opt: % | sql: %', SQLERRM, SQLSTATE, _opt, sql;	
+            RAISE EXCEPTION 'geoSICOB (sicob_difference) % , % , _opt: % ', SQLERRM, SQLSTATE, _opt;	
 END;
 $function$
 ;CREATE OR REPLACE FUNCTION public.sicob_difference(geometry, geometry)

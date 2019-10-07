@@ -127,6 +127,11 @@ FROM (
 WHERE r.sicob_sup_sob IS NOT NULL
 ) q';
 
+IF(sicob_exist_column(_lyr_in,'sicob_sup') = FALSE) THEN
+	EXECUTE Format('ALTER TABLE %s ADD COLUMN sicob_sup double precision', _lyr_in);
+    EXECUTE Format('UPDATE %s SET sicob_sup = round((ST_Area(ST_Transform(the_geom, SICOB_utmzone_wgs84(the_geom)))/10000)::numeric,5)', _lyr_in);
+END IF;
+
 EXECUTE 'SELECT sum(sicob_sup) FROM ' || _lyr_in || ' a' ||
 ' WHERE TRUE ' || COALESCE( 'AND (' ||  (_opt->>'condition')::text || ')', '') INTO _superficie_in;
 

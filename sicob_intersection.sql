@@ -46,6 +46,8 @@ BEGIN
 --> add_sup_total (opcional true/false): Calcula y devuelve la superficie total sobrepuesta en hectareas.
 --> min_sup (opcional): Superficie minima (en hectareas) permitida para los poligonos de la capa resultado.
 --> add_geoinfo (opcional true/false): Agrega o no la informaciï¿½n del cï¿½digo de proyecciï¿½n UTM 'sicob_utm', superficie (ha) y 'sicob_sup' para cada polï¿½gono.
+--> add_fields (opcional true/false): Agrega los campos de "b" en el resultado.
+--> add_sup (opcional true/false): Calcular la superficie en ha. Por defecto es "true".
 ---------------------------
 --VALORES DEVUELTOS
 ---------------------------
@@ -72,6 +74,7 @@ SELECT
     COALESCE((opt->>'subfix')::text,'') || '_a_inter_b' as subfix,
     COALESCE((opt->>'schema')::text,'temp') as _schema,
     COALESCE((opt->>'min_sup')::real,0::real) as min_sup,
+    COALESCE((opt->>'add_sup')::boolean,TRUE) as add_sup,
     COALESCE((opt->>'add_sup_total')::boolean,FALSE) as add_sup_total
  FROM (
  	SELECT 
@@ -107,8 +110,12 @@ a_inter_b AS (
           ELSE
               ''
           END ||
-          '(st_area(ST_Transform( st_intersection(a.the_geom,b.the_geom), SICOB_utmzone_wgs84(st_intersection(a.the_geom,b.the_geom)) ))/10000) as sicob_sup,
-          st_intersection(a.the_geom,b.the_geom) as the_geom
+          CASE WHEN add_sup THEN
+          '(st_area(ST_Transform( st_intersection(a.the_geom,b.the_geom), SICOB_utmzone_wgs84(st_intersection(a.the_geom,b.the_geom)) ))/10000) as sicob_sup,'
+          ELSE
+          ''
+          END ||
+          'st_intersection(a.the_geom,b.the_geom) as the_geom
         from 
         ' || a::text || ' a 
         INNER JOIN ' || b::text || ' b
@@ -131,8 +138,8 @@ a_inter_b AS (
       )
       SELECT * FROM a_inter_b_fixsliver',
       json_build_object(
-            'table_out', _schema || '.' || tbl_a || subfix,
-            'temp', false,
+            'table_out', CASE WHEN _temp THEN 't' || MD5(random()::text) ELSE _schema || '.' || tbl_a || subfix END ,
+            'temp', _temp,
             'create_index', true
       )
 	)->>'table_out' as lyr_inter

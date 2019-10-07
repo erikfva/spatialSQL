@@ -158,7 +158,7 @@ SELECT
         	'sicob_sup_total',
             (SELECT res_inter->>'inters_sup' FROM _intersected)::real +       
             CASE WHEN add_diff THEN
-                (SELECT res_diff->>'diff_sup' FROM _difference)::real  
+               COALESCE( (SELECT res_diff->>'diff_sup' FROM _difference)::real, 0)  
             ELSE
                 0
             END          
