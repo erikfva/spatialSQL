@@ -1,6 +1,7 @@
 set PATH_OGR2OGR=C:\Program Files\QGIS 3.6\bin\ogr2ogr.exe
 set PATH_GDB=F:\ASIG\coberturas\Geodatabase.gdb
 set pghost=localhost
+REM set pghost=192.168.50.46
 set pgport=5432
 set pgdb=geodatabase
 set pguser=admderechos

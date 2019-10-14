@@ -608,7 +608,7 @@ IF 'PLUS' = ANY (_doanalisys) THEN
     _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.plus","subfix":"_plus", "add_diff":true,"schema":"temp","add_sup_total":true, "add_geoinfo":true}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se ha encontrado sobreposicion.
 		
-        -->Almacenando la informacion para generar shapefiles    	
+        -->Almacenando la informacion para generar shapefiles.    	
         _out_shp := _out_shp::jsonb || 
         	jsonb_build_object(
             	'lyr',_aux->>'lyr_over',
@@ -617,23 +617,26 @@ IF 'PLUS' = ANY (_doanalisys) THEN
             ); 
         
         _aux := _aux::jsonb || ('{"lyr_b":"coberturas.plus","nombre":"Plan de Uso de Suelo (PLUS)","porcentaje_sup":"' || (round(((_aux->>'sicob_sup_total')::float *100/_superficie_in)::numeric,1))::text || '"}')::jsonb;
-         EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
-    FROM (
-      SELECT 
-        b.id_a,
-        COALESCE(b.categoria,''SIN INFORMACION'') as categoria,
-        COALESCE(b.subcategoria,''SIN INFORMACION'') as subcategoria,
-        COALESCE(b.codigo,''SIN INFORMACION'') as codigo,
-        b.sicob_sup,
-        round(cast((b.sicob_sup * 100 / a.sicob_sup) as numeric),1) as PCTJE,
-        b.sicob_id,
-        b.source
-      FROM
-        %s a
-        INNER JOIN %s b ON (a.sicob_id = b.id_a)
-      ORDER BY
-        id_a, categoria
-    ) q', _lyr_in, _aux->>'lyr_over') INTO detalle;
+    	
+        -->Generando el detalle de sobreposicion.
+        EXECUTE format('SELECT array_to_json(array_agg(q)) as detalle
+        FROM (
+          SELECT 
+            b.id_a,
+            b.id_b,
+            COALESCE(b.categoria,''SIN INFORMACION'') as categoria,
+            COALESCE(b.subcategoria,''SIN INFORMACION'') as subcategoria,
+            COALESCE(b.codigo,''SIN INFORMACION'') as codigo,
+            b.sicob_sup,
+            round(cast((b.sicob_sup * 100 / a.sicob_sup) as numeric),1) as PCTJE,
+            b.sicob_id,
+            b.source
+          FROM
+            %s a
+            INNER JOIN %s b ON (a.sicob_id = b.id_a)
+          ORDER BY
+            id_a, categoria
+        ) q', _lyr_in, _aux->>'lyr_over') INTO detalle;
         _aux := _aux::jsonb || ('{"detalle":' || detalle || '}')::jsonb;
         _out := _out::jsonb || ('{"PLUS":' || _aux::text || '}')::jsonb; 
     END IF;
@@ -775,7 +778,18 @@ IF 'APN' = ANY (_doanalisys) THEN
 	IF _debug THEN
     	RAISE NOTICE 'sicob_analisis_sobreposicion: APN';
     END IF;
-    _aux := sicob_overlap(('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.apn","subfix":"_apn","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
+    _aux := sicob_overlap(
+    	json_build_object(
+        	'a', 			_lyr_in,
+            'condition_a',	COALESCE( (_opt->>'condition')::text , 'TRUE'),
+            'b', 			'coberturas.apn',
+            'subfix',		'_apn',
+            'schema',		'temp',
+            'add_sup_total',true,
+            'filter_overlap',false
+        )
+    );
+    --('{"a":"' || _lyr_in || '","condition_a":"' || COALESCE( (_opt->>'condition')::text , 'TRUE') || '", "b":"coberturas.apn","subfix":"_apn","schema":"temp","add_sup_total":true,"filter_overlap":false}')::json);
     IF COALESCE( (_aux->>'features_inters_cnt')::int,0) > 0 THEN --> Si se ha encontrado sobreposicion.
         
         -->Almacenando la informacion para generar shapefiles    	
