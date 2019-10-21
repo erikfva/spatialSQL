@@ -92,7 +92,7 @@ overlayer AS (
           sicob_id,
           (st_dump(the_geom)).geom as the_geom 
           FROM
-          ' || a || '
+          ' || a || ' a
           WHERE
           (' || condition_a || ')
         ) t
@@ -238,31 +238,26 @@ overlayer AS (
               ) > 0 
     ),
     overlayer AS (
-        SELECT
-          id_a,
-          id_b,
-          the_geom
-        FROM
-        a_inter_b
-        UNION ALL
-        SELECT
-          sicob_id as id_a,
-          NULL as id_b,
-          the_geom
-        FROM
-        a_diff_b    
-    ),
-    overlayer_fields AS (
-        SELECT
-            o.id_a,
-            o.id_b,
-            ' || sicob_no_geo_column(b,'{sicob_id,id_a,source_a,id_b,source_b, sicob_sup, sicob_utm}','b.') || ',
-            o.the_geom
-        FROM
-            overlayer o
-            left JOIN
-            ' || b || ' b
-            on (o.id_b = b.sicob_id)
+    	SELECT
+        	row_number() over() as sicob_id,
+            id_a,
+            id_b,
+            the_geom
+        FROM (           
+          SELECT
+            id_a,
+            id_b,
+            the_geom
+          FROM
+          a_inter_b
+          UNION ALL
+          SELECT
+            sicob_id as id_a,
+            NULL as id_b,
+            the_geom
+          FROM
+          a_diff_b  
+        ) t  
     )
       SELECT 
       	t.*, ' ||
@@ -296,8 +291,11 @@ overlayer_fields AS (
 	SELECT
       sicob_executesql('
         SELECT
+        	o.sicob_id,
             o.id_a,
             o.id_b,
+            o.source_a,
+            o.source_b,
             ' || sicob_no_geo_column(p.b,'{sicob_id,id_a,source_a,id_b,source_b, sicob_sup, sicob_utm}','b.') || ',
             o.the_geom
         FROM

@@ -4,6 +4,7 @@ CREATE OR REPLACE FUNCTION public.sicob_obtener_predio2x(_opt json)
  LANGUAGE plpgsql
 AS $function$
 DECLARE 
+ s text;
  sql text;
  _out json := '{}';
  _tolerance text;
@@ -54,11 +55,14 @@ BEGIN
 --_opt := '{"lyr_in":"uploads.f20170921fdaecgbaaab0ca1"}';
 --_opt := '{"lyr_in":"uploads.f20170926adcgefb27cabb75"}';
 --_opt := '{"lyr_in":"processed.f20170928daecbfg7768f8ae_nsi","min_sup":"0","tolerance":"0"}';
---_opt := '{"lyr_in":"processed.f20171005fgcbdae84fb9ea1_nsi"}';
+_opt := '{"lyr_in":"processed.f20171005fgcbdae84fb9ea1_nsi"}';
 --_opt := '{"lyr_in":"uploads.f20190515fgdcbead21d39cd"}';
 --_opt := '{"lyr_in":"processed.f20190724dfcageb5181a581_fixt", "lyr_parc":"processed.f20190724efagbdcba722cc2_fixt", "fldpredio_parc":"id", "fldpropietario_parc":"id" }';
-
-
+/*
+_opt := json_build_object(
+  'lyr_in','uploads.f20191014abcdgef3bcfaaf2'
+  );
+*/
 _tolerance := COALESCE((_opt->>'tolerance')::text, '0'); --> 5.3
 
 tbl_name := (_opt->>'lyr_in')::text;
@@ -142,15 +146,18 @@ a := (_opt->>'lyr_in')::text;
 --> ANALIZANDO CADA COBERTURAS DE PREDIOS/PARCELAS 
 FOR lyr_predio IN SELECT * FROM json_array_elements(lyrs_predio) LOOP
 	IF a <> '' AND lyr_predio->>'lyr_parc' <> '' THEN --> Si existen poligonos para localizar.
-    	_out := sicob_overlap2x(('{"a":"' || a || 
-        			'","condition_a":"' || _condition || 
-                    '","b":"' || (lyr_predio->'lyr_parc'->>'source')::text || 
-                    '","subfix":"' || (lyr_predio->>'subfix')::text || 
-                    '","tolerance":"' || COALESCE((lyr_predio->>'tolerance')::text, _tolerance ) || 
-                    '","add_diff":true,"temp" : false' ||
-                    '","add_fields":true' || 
-                    ',"add_geoinfo":true' ||
-                    '}')::json); 
+    	_out := sicob_overlap2x(
+        			json_build_object(
+                    	'a',			a,
+                        'condition_a',	_condition,
+                        'b',			lyr_predio->'lyr_parc'->>'source',
+                        'subfix',		lyr_predio->>'subfix',
+                        'tolerance',	COALESCE((lyr_predio->>'tolerance')::text, _tolerance ),
+                        'add_diff',		true,
+                        'add_fields',	true,
+                        'add_geoinfo',	true   
+                    )
+        		); 
         IF COALESCE( (_out->>'features_inters_cnt')::int,0) > 0 THEN  --> Si se han localizado predios.
         
         	inters_cnt := inters_cnt +  (_out->>'features_inters_cnt')::int;
@@ -311,7 +318,38 @@ IF COALESCE( (_out->>'features_diff_cnt')::int,0) > 0 THEN --> si existen poligo
       END IF;
 END IF;
 
+/************************************/
+/* AGRUPANDO CAPA RESULTADO POR ID */
+/************************************/
+s:= sicob_no_geo_column(
+        	tbl_name || _subfix || '_ppred',
+            '{id_a, id_b}',
+            'a.'
+	);
+    
+sql := '
+	SELECT
+    a.id_a,
+    a.id_b, ' || 
+    s || ', 
+    ST_UnaryUnion(
+	ST_Collect(the_geom)
+    ) as the_geom
+    FROM
+    ' || tbl_name || _subfix || '_ppred' || ' a
+    group by a.id_a, a.id_b, ' || s;
+s := sicob_executesql(
+		sql,
+        json_build_object(
+            'temp', TRUE,
+            'create_index', TRUE
+        )
+	)->>'table_out';    
+
+
+/*************************************************************************************/
 	--> CREANDO LA COBERTURA RESULTANTE Y AGREGANDO LOS CAMPOS DE LA CAPA DE ENTRADA.
+/*************************************************************************************/
     sql := 'SELECT  
   		r.predio,
   		r.propietario,
@@ -327,14 +365,19 @@ END IF;
         cast(r.source_predio as text) as source_predio,
         r.id_predio, ' || 
     	sicob_no_geo_column(
-        	(_opt->>'lyr_in') ,
+        	_opt->>'lyr_in' ,
             '{sicob_id, predio, propietario, titulo, fecha_titulo, sup_predio, tipo_propiedad, parcela, resol_pop, fec_resol_pop, sicob_sup, sicob_utm, id_predio, source_parcela, id_parcela, source_predio}',
         	--> ('{' || sicob_no_geo_column((_opt->>'lyr_over')::text ,'{}',' '::text) || '}')::text[],
             'a.'
         ) || 
         ',r.the_geom
-    	 FROM ' || tbl_name || _subfix || '_ppred' || ' r 
-  		 INNER JOIN ' || (_opt->>'lyr_in')::text || ' a ON (r.id_a = a.' || COALESCE(sicob_feature_id((_opt->>'lyr_in')::text ), 'sicob_id') || ') ' ||
+    	 FROM ' || s || ' r 
+  		 INNER JOIN ' || 
+         (_opt->>'lyr_in')::text || 
+         ' a ON (r.id_a = a.' || 
+         COALESCE(sicob_feature_id(
+         	(_opt->>'lyr_in')::text 
+         ), 'sicob_id') || ') ' ||
 --        'WHERE r.predio IS NOT NULL ' || --> Filtrando en la capa resultado solamente los poligonos que tienen predio.
         'ORDER BY a.sicob_id';
 	sql := '
@@ -375,7 +418,18 @@ IF inters_cnt > 0 THEN --> Si se han encontrado poligonos.
 	IF COALESCE( (_opt->>'lyr_parc')::text,'') <> '' THEN --> Si se indica cobertura de referencia.
     	_condition := _condition || ' OR a.source_parcela = ''' || (_opt->>'lyr_parc')::text || '''';
     END IF;
-    tmp := sicob_overlap2x(('{"a":"' || a || '","condition_a":"' || _condition || '","b":"coberturas.predios_pop","subfix":"_pop","tolerance":"0","add_diff":false, "temp": true}')::json);
+    tmp := sicob_overlap2x(
+    	json_build_object(
+        	'a',			a,
+            'condition_a',	_condition,
+            'b',			'coberturas.predios_pop',
+            'subfix',		'_pop',
+            'tolerance',	0,
+            'add_diff',		FALSE,
+            'add_fields',	TRUE,
+            'temp',			TRUE
+        )
+    );
     IF COALESCE( (tmp->>'features_inters_cnt')::int,0) > 0 THEN --> Si se han encontrado POP.
         sql := '
             UPDATE ' || a || ' a
