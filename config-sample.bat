@@ -4,7 +4,7 @@ set pghost=localhost
 set pgport=5432
 set pgdb=geosicob
 set pguser=admderechos
-set pgpsw=Geo2020*
+set pgpsw=<aqui coloque el pass>
 REM ******************
 REM * El password para el usuario "pguser" debe configurarse en el archivo .pgpass del sistema.
 REM * On Microsoft Windows the file is named %APPDATA%\postgresql\pgpass.conf (where %APPDATA% refers to the Application Data subdirectory in the user's profile).
